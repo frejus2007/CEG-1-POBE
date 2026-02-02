@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { getCycleByLevel, getCoefficient } from '../utils/coefficients';
 
 const SchoolContext = createContext();
 
@@ -28,6 +29,13 @@ export const SchoolProvider = ({ children }) => {
     const [students, setStudents] = useState([]);
     const [subjects, setSubjects] = useState([]);
     const [activeYear, setActiveYear] = useState(null);
+    const [notifications, setNotifications] = useState([]);
+    const [appConfig, setAppConfig] = useState(null);
+    const [systemStats, setSystemStats] = useState({
+        missingGrades: 0,
+        totalExpected: 0,
+        progress: 0
+    });
 
     // Auth Methods
     const login = async (email, password) => {
@@ -37,6 +45,27 @@ export const SchoolProvider = ({ children }) => {
         });
         if (error) throw error;
         return data;
+    };
+
+    const sendNotification = async (notificationData) => {
+        // notificationData: { title, body, type, receiverIds: [] }
+        try {
+            const payloads = notificationData.receiverIds.map(id => ({
+                title: notificationData.title,
+                body: notificationData.body,
+                type: notificationData.type || 'INFO',
+                receiver_id: id,
+                is_read: false
+            }));
+
+            const { error } = await supabase.from('notifications').insert(payloads);
+            if (error) throw error;
+            await refreshData();
+            return { success: true };
+        } catch (err) {
+            console.error("Error sending notification:", err);
+            return { success: false, error: err.message };
+        }
     };
 
     const logout = async () => {
@@ -171,6 +200,24 @@ export const SchoolProvider = ({ children }) => {
                 console.warn("Grades fetch exception:", gErr);
             }
 
+            // 8. Notifications / Recent Activities
+            const { data: notifData, error: notifError } = await supabase
+                .from('notifications')
+                .select('*')
+                .order('created_at', { ascending: false })
+                .limit(10);
+            if (notifError) {
+                console.warn("Notifications fetch error:", notifError.message);
+            }
+            setNotifications(notifData || []);
+
+            // 9. App Config
+            const { data: configData, error: configError } = await supabase
+                .from('app_config')
+                .select('*')
+                .maybeSingle();
+            if (!configError) setAppConfig(configData);
+
 
             // --- TRANSFORM DATA ---
 
@@ -207,7 +254,8 @@ export const SchoolProvider = ({ children }) => {
                     phone: t.phone || '',
                     email: t.email || '',
                     classes: classNames,
-                    is_approved: true
+                    is_approved: true,
+                    subjectIds: t.subject_ids ? t.subject_ids.map(id => parseInt(id)) : (t.specialty_subject_id ? [t.specialty_subject_id] : [])
                 };
             });
 
@@ -235,7 +283,8 @@ export const SchoolProvider = ({ children }) => {
                     phone: p.phone,
                     email: p.email || '',
                     classes: [],
-                    is_approved: false
+                    is_approved: false,
+                    subjectIds: p.subject_ids ? p.subject_ids.map(id => parseInt(id)) : (p.specialty_subject_id ? [p.specialty_subject_id] : [])
                 };
             });
 
@@ -273,6 +322,8 @@ export const SchoolProvider = ({ children }) => {
                     matricule: s.matricule,
                     nom: s.last_name,
                     prenom: s.first_name,
+                    full_name: `${s.last_name} ${s.first_name}`,
+                    current_class_id: s.current_class_id,
                     class: s.class?.name || 'Non assigné',
                     dob: s.date_of_birth || '',
                     avg: 0,
@@ -284,6 +335,31 @@ export const SchoolProvider = ({ children }) => {
             setTeachers(formattedTeachers);
             setAssignments(formattedAssignments);
             setStudents(formattedStudents);
+
+            // --- CALCULATE SYSTEM STATS ---
+            const totalStudents = studentsData.length;
+            const totalAssignments = assignmentsData.length;
+            const expectedGrades = totalStudents * totalAssignments; // Simplified: usually it's sum(students in class X * assignments for class X)
+
+            // Refined calculation
+            let totalExpected = 0;
+            classesData.forEach(cls => {
+                const classStudents = studentsData.filter(s => s.current_class_id === cls.id).length;
+                const classAssignments = assignmentsData.filter(a => a.class_id === cls.id).length;
+                totalExpected += (classStudents * classAssignments);
+            });
+
+            const enteredGrades = gradesData ? gradesData.length : 0;
+            const missingGrades = Math.max(0, totalExpected - enteredGrades);
+            const progress = totalExpected > 0 ? Math.round((enteredGrades / totalExpected) * 100) : 100;
+
+            setSystemStats({
+                missingGrades,
+                totalExpected,
+                progress
+            });
+
+            setLoading(false);
             setSubjects(subjectsData || []);
 
             console.log("Supabase data loaded successfully");
@@ -367,6 +443,7 @@ export const SchoolProvider = ({ children }) => {
             const payload = {
                 name: classData.name,
                 level: classData.level,
+                cycle: getCycleByLevel(classData.level),
                 academic_year_id: activeYear.id,
                 main_teacher_id: classData.mainTeacherId || null
             };
@@ -393,12 +470,53 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('classes')
                 .update({
                     name: classData.name,
-                    level: classData.level, // Update level if needed
+                    level: classData.level,
+                    cycle: getCycleByLevel(classData.level),
                     main_teacher_id: classData.mainTeacherId || null
                 })
                 .eq('id', id);
 
             if (error) throw error;
+
+            // --- AUTOMATIC CONDUITE ASSIGNMENT ---
+            if (classData.mainTeacherId) {
+                try {
+                    // Fetch directly from DB to avoid staleness
+                    const { data: subjs } = await supabase.from('subjects').select('id, name');
+                    const conduiteSubj = subjs?.find(s => s.name.toLowerCase().includes('conduite'));
+
+                    if (conduiteSubj) {
+                        const { data: existing } = await supabase
+                            .from('teacher_assignments')
+                            .select('id')
+                            .eq('class_id', id)
+                            .eq('subject_id', conduiteSubj.id)
+                            .maybeSingle();
+
+                        if (!existing) {
+                            await supabase.from('teacher_assignments').insert({
+                                teacher_id: classData.mainTeacherId,
+                                class_id: id,
+                                subject_id: conduiteSubj.id
+                            });
+                            // Use coefficient 1 for Conduite
+                            await supabase.from('class_subjects').upsert({
+                                class_id: id,
+                                subject_id: conduiteSubj.id,
+                                coefficient: 1
+                            }, { onConflict: 'class_id, subject_id' });
+                        } else {
+                            await supabase.from('teacher_assignments')
+                                .update({ teacher_id: classData.mainTeacherId })
+                                .eq('class_id', id)
+                                .eq('subject_id', conduiteSubj.id);
+                        }
+                    } else {
+                        console.warn("Matière 'Conduite' non trouvée dans la BDD.");
+                    }
+                } catch (cErr) { console.error("Conduite automation error:", cErr); }
+            }
+
             await refreshData();
             return { success: true };
         } catch (err) {
@@ -533,20 +651,33 @@ export const SchoolProvider = ({ children }) => {
     // --- ASSIGNMENT MANAGEMENT ---
     const addAssignment = async (assignmentData) => {
         try {
-            // assignmentData: { teacherId, classId, subjectId }
-            // Note: UI sends names currently, we need to map them or update UI to send IDs.
-            // Let's assume for now we need to look up IDs if they aren't provided, 
-            // OR update UI to send IDs (Preferred). 
-            // Looking at Assignments.jsx, it uses names mainly.
-            // Let's implement lookup here for robustness or assume IDs from updated UI.
+            const subjectId = assignmentData.subject_id || assignmentData.subjectId;
+            const subjectIds = Array.isArray(subjectId) ? subjectId : [subjectId];
 
-            const { error } = await supabase.from('teacher_assignments').insert({
-                teacher_id: assignmentData.teacherId,
-                class_id: assignmentData.classId,
-                subject_id: assignmentData.subjectId
-            });
+            for (const subjId of subjectIds) {
+                const { error } = await supabase.from('teacher_assignments').insert({
+                    teacher_id: assignmentData.teacherId,
+                    class_id: assignmentData.classId,
+                    subject_id: subjId
+                });
 
-            if (error) throw error;
+                if (error) throw error;
+
+                // --- AUTOMATED COEFFICIENT ---
+                try {
+                    const targetClass = classes.find(c => c.id == assignmentData.classId);
+                    const targetSubject = subjects.find(s => s.id == subjId);
+                    if (targetClass && targetSubject) {
+                        const coeff = getCoefficient(targetClass.name, targetSubject.name);
+                        await supabase.from('class_subjects').upsert({
+                            class_id: assignmentData.classId,
+                            subject_id: subjId,
+                            coefficient: coeff
+                        }, { onConflict: 'class_id, subject_id' });
+                    }
+                } catch (cErr) { console.error("Coeff automation error:", cErr); }
+            }
+
             await refreshData();
             return { success: true };
         } catch (err) {
@@ -566,6 +697,21 @@ export const SchoolProvider = ({ children }) => {
                 .eq('id', id);
 
             if (error) throw error;
+
+            // Update coefficient if subject/class changed
+            try {
+                const targetClass = classes.find(c => c.id == assignmentData.classId);
+                const targetSubject = subjects.find(s => s.id == assignmentData.subjectId);
+                if (targetClass && targetSubject) {
+                    const coeff = getCoefficient(targetClass.name, targetSubject.name);
+                    await supabase.from('class_subjects').upsert({
+                        class_id: assignmentData.classId,
+                        subject_id: assignmentData.subjectId,
+                        coefficient: coeff
+                    }, { onConflict: 'class_id, subject_id' });
+                }
+            } catch (cErr) { console.error("Coeff update error:", cErr); }
+
             await refreshData();
             return { success: true };
         } catch (err) {
@@ -605,11 +751,15 @@ export const SchoolProvider = ({ children }) => {
         addAssignment,
         updateAssignment,
         deleteAssignment,
+        sendNotification,
         validateHeadTeacherAssignment,
+        appConfig,
+        systemStats,
         loading,
         error,
         refreshData,
         activeYear,
+        notifications,
         user,
         session,
         userRole,

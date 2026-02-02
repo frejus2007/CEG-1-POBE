@@ -13,10 +13,7 @@ export const useAcademicYear = () => {
 
 export const AcademicYearProvider = ({ children }) => {
     // State for Archives
-    const [availableYears, setAvailableYears] = useState(() => {
-        const stored = localStorage.getItem('availableYears');
-        return stored ? JSON.parse(stored) : ['2023-2024', '2024-2025', '2025-2026'];
-    });
+    const [availableYears, setAvailableYears] = useState([]);
     const [selectedYear, setSelectedYear] = useState(() => localStorage.getItem('selectedYear') || '2025-2026');
 
     // Basic State
@@ -79,7 +76,28 @@ export const AcademicYearProvider = ({ children }) => {
         }
     };
 
+    const fetchAcademicYears = async () => {
+        try {
+            const { data, error } = await supabase.from('academic_years').select('name, is_active');
+            if (error) throw error;
+            if (data && data.length > 0) {
+                const years = data.map(y => y.name).sort();
+                setAvailableYears(years);
+
+                // Sync current active year if found
+                const active = data.find(y => y.is_active);
+                if (active) {
+                    setAcademicYear(active.name);
+                    if (!selectedYear) setSelectedYear(active.name);
+                }
+            }
+        } catch (err) {
+            console.error("Error fetching academic years:", err);
+        }
+    };
+
     useEffect(() => {
+        fetchAcademicYears();
         fetchPeriods();
     }, []);
 

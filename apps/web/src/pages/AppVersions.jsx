@@ -1,14 +1,25 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Input from '../components/ui/Input';
 import { Smartphone, Upload, Link, Check, AlertTriangle, FileText } from 'lucide-react';
 
+import { useSchool } from '../context/SchoolContext';
+
 const AppVersions = () => {
-    const [version, setVersion] = useState('1.1.0');
+    const { appConfig } = useSchool();
+    const [version, setVersion] = useState('');
     const [file, setFile] = useState(null);
-    const [changelog, setChangelog] = useState('- Correction bug synchronisation\n- Amélioration du calcul des moyennes\n- Interface plus fluide');
-    const [minVersion, setMinVersion] = useState('1.0.0');
+    const [changelog, setChangelog] = useState('');
+    const [minVersion, setMinVersion] = useState('');
+
+    useEffect(() => {
+        if (appConfig) {
+            setVersion(appConfig.version || '1.0.0');
+            setMinVersion(appConfig.min_version || '1.0.0');
+            setChangelog(appConfig.release_notes || '');
+        }
+    }, [appConfig]);
 
     // Mock steps state
     const [steps, setSteps] = useState({
@@ -49,15 +60,19 @@ const AppVersions = () => {
                 <div className="lg:col-span-1 space-y-6">
                     <Card className="bg-gradient-to-br from-blue-500 to-blue-600 text-white border-none">
                         <h2 className="text-lg font-bold mb-1 opacity-90">Version en production</h2>
-                        <div className="text-4xl font-extrabold mb-4">1.0.0</div>
+                        <div className="text-4xl font-extrabold mb-4">{appConfig?.version || '---'}</div>
                         <div className="space-y-2 text-sm opacity-90">
-                            <p>Publiée le: 15/01/2026</p>
-                            <p>Installations actives: 42</p>
+                            <p>Dernière mise à jour: {appConfig?.updated_at ? new Date(appConfig.updated_at).toLocaleDateString() : '---'}</p>
+                            <p>Version min. requise: {appConfig?.min_version || '---'}</p>
                         </div>
                         <div className="mt-6 pt-6 border-t border-white/20">
-                            <Button variant="secondary" className="w-full bg-white/10 text-white hover:bg-white/20 border-white/30 truncate">
+                            <Button
+                                variant="secondary"
+                                className="w-full bg-white/10 text-white hover:bg-white/20 border-white/30 truncate"
+                                onClick={() => appConfig?.download_url && window.open(appConfig.download_url, '_blank')}
+                            >
                                 <Link className="w-4 h-4 mr-2" />
-                                Ouvrir le dossier Drive
+                                Ouvrir le lien APK
                             </Button>
                         </div>
                     </Card>
@@ -65,19 +80,8 @@ const AppVersions = () => {
                     <Card>
                         <h2 className="text-md font-bold text-gray-800 mb-4">Dernières versions</h2>
                         <div className="space-y-4">
-                            <div className="flex justify-between items-center pb-3 border-b border-gray-50 last:border-0 last:pb-0">
-                                <div>
-                                    <p className="font-medium text-gray-800">v1.0.0</p>
-                                    <p className="text-xs text-gray-500">15 Jan 2026</p>
-                                </div>
-                                <span className="text-xs bg-green-100 text-green-700 px-2 py-1 rounded-full">Active</span>
-                            </div>
-                            <div className="flex justify-between items-center pb-3 border-b border-gray-50 last:border-0 last:pb-0">
-                                <div>
-                                    <p className="font-medium text-gray-800">v0.9.5-beta</p>
-                                    <p className="text-xs text-gray-500">10 Jan 2026</p>
-                                </div>
-                                <span className="text-xs bg-gray-100 text-gray-600 px-2 py-1 rounded-full">Archivée</span>
+                            <div className="text-center py-6 text-gray-500 italic text-sm">
+                                Historique des versions non disponible
                             </div>
                         </div>
                     </Card>

@@ -1,19 +1,36 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
 import Select from '../components/ui/Select';
 import { PieChart, FileText, Download, FileSpreadsheet, File as FileIcon, Printer, History } from 'lucide-react';
+import { useSchool } from '../context/SchoolContext';
 
 const Reports = () => {
+    const { classes, students: allStudents } = useSchool();
     const [reportType, setReportType] = useState('individual');
     const [trimester, setTrimester] = useState('1');
-    const [selectedClass, setSelectedClass] = useState('6emeA');
-    const [student, setStudent] = useState('adjobi');
+    const [selectedClassId, setSelectedClassId] = useState('');
+    const [studentId, setStudentId] = useState('');
     const [formats, setFormats] = useState({
         pdf: true,
         excel: true,
         csv: false
     });
+
+    // Filter students based on selected class
+    const availableStudents = allStudents.filter(s => s.current_class_id === selectedClassId);
+
+    useEffect(() => {
+        if (classes.length > 0 && !selectedClassId) {
+            setSelectedClassId(classes[0].id);
+        }
+    }, [classes]);
+
+    useEffect(() => {
+        if (availableStudents.length > 0 && !studentId) {
+            setStudentId(availableStudents[0].id);
+        }
+    }, [availableStudents]);
 
     const handleGenerate = () => {
         // Mock generation logic
@@ -84,28 +101,24 @@ const Reports = () => {
                         {/* Paramètres */}
                         <div className="grid grid-cols-2 gap-4">
                             <div>
-                                <label className="block text-sm font-medium text-gray-700 mb-1">Trimestre</label>
+                                <label className="block text-sm font-medium text-gray-700 mb-1">Semestre</label>
                                 <Select value={trimester} onChange={(e) => setTrimester(e.target.value)}>
-                                    <option value="1">1er Trimestre</option>
-                                    <option value="2">2ème Trimestre</option>
-                                    <option value="3">3ème Trimestre</option>
+                                    <option value="1">1er Semestre</option>
+                                    <option value="2">2ème Semestre</option>
                                 </Select>
                             </div>
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Classe</label>
-                                <Select value={selectedClass} onChange={(e) => setSelectedClass(e.target.value)}>
-                                    <option value="6emeA">6ème A</option>
-                                    <option value="6emeB">6ème B</option>
-                                    <option value="5emeA">5ème A</option>
+                                <Select value={selectedClassId} onChange={(e) => setSelectedClassId(e.target.value)}>
+                                    {classes.map(c => <option key={c.id} value={c.id}>{c.name}</option>)}
                                 </Select>
                             </div>
                             {reportType === 'individual' && (
                                 <div className="col-span-2">
                                     <label className="block text-sm font-medium text-gray-700 mb-1">Élève</label>
-                                    <Select value={student} onChange={(e) => setStudent(e.target.value)}>
-                                        <option value="adjobi">ADJOBI Jean</option>
-                                        <option value="sossou">SOSSOU Pierre</option>
-                                        <option value="tossou">TOSSOU Alice</option>
+                                    <Select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
+                                        {availableStudents.map(s => <option key={s.id} value={s.id}>{s.full_name}</option>)}
+                                        {availableStudents.length === 0 && <option value="">Aucun élève trouvé</option>}
                                     </Select>
                                 </div>
                             )}
@@ -165,49 +178,9 @@ const Reports = () => {
                         </h2>
 
                         <div className="space-y-3">
-                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group cursor-pointer">
-                                <div className="flex items-center space-x-3">
-                                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-lg flex items-center justify-center">
-                                        <FileIcon className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-800">Bulletin_6emeA_Trimestre1.pdf</p>
-                                        <p className="text-xs text-gray-500">01/02/2026 • 2.4 MB</p>
-                                    </div>
-                                </div>
-                                <Button variant="ghost" className="opacity-0 group-hover:opacity-100 p-2">
-                                    <Download className="w-4 h-4" />
-                                </Button>
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group cursor-pointer">
-                                <div className="flex items-center space-x-3">
-                                    <div className="w-10 h-10 bg-green-100 text-green-600 rounded-lg flex items-center justify-center">
-                                        <FileSpreadsheet className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-800">Stats_Generales_T1.xlsx</p>
-                                        <p className="text-xs text-gray-500">30/01/2026 • 45 KB</p>
-                                    </div>
-                                </div>
-                                <Button variant="ghost" className="opacity-0 group-hover:opacity-100 p-2">
-                                    <Download className="w-4 h-4" />
-                                </Button>
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 bg-gray-50 rounded-lg hover:bg-gray-100 transition-colors group cursor-pointer">
-                                <div className="flex items-center space-x-3">
-                                    <div className="w-10 h-10 bg-red-100 text-red-600 rounded-lg flex items-center justify-center">
-                                        <FileIcon className="w-5 h-5" />
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-800">Liste_Profs_Principaux.pdf</p>
-                                        <p className="text-xs text-gray-500">28/01/2026 • 1.2 MB</p>
-                                    </div>
-                                </div>
-                                <Button variant="ghost" className="opacity-0 group-hover:opacity-100 p-2">
-                                    <Download className="w-4 h-4" />
-                                </Button>
+                            <div className="text-center py-8 text-gray-500">
+                                <FileIcon className="w-12 h-12 mx-auto mb-3 opacity-20" />
+                                <p>Aucun rapport généré récemment</p>
                             </div>
                         </div>
                     </Card>

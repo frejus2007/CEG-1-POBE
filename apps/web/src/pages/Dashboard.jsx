@@ -57,7 +57,41 @@ const ActivityItem = ({ title, time, type }) => (
 );
 
 const Dashboard = () => {
-    const { students, teachers, classes } = useSchool();
+    const { students, teachers, classes, notifications } = useSchool();
+
+    // Map real notifications to activities
+    const activities = notifications.length > 0 ? notifications.map(n => ({
+        id: n.id,
+        title: n.title,
+        time: new Date(n.created_at).toLocaleString('fr-FR', {
+            day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit'
+        }),
+        type: n.type?.toLowerCase() || 'info'
+    })) : [];
+
+    // Derive alerts from data (e.g. classes without main teacher)
+    const alerts = [];
+    classes.forEach(c => {
+        if (!c.mainTeacher || c.mainTeacher === 'Non assigné') {
+            alerts.push({
+                id: `pp-${c.id}`,
+                title: `Professeur Principal manquant`,
+                desc: `La classe ${c.name} n'a pas encore de PP assigné.`,
+                variant: 'warning'
+            });
+        }
+    });
+
+    // Check for pending teacher approvals
+    const pendingTeachers = teachers.filter(t => !t.is_approved);
+    if (pendingTeachers.length > 0) {
+        alerts.push({
+            id: 'pending-teachers',
+            title: `${pendingTeachers.length} Profil(s) en attente`,
+            desc: `Des nouveaux professeurs attendent votre validation.`,
+            variant: 'info'
+        });
+    }
 
     return (
         <motion.div
@@ -101,49 +135,40 @@ const Dashboard = () => {
                         <button className="text-sm text-blue-600 hover:text-blue-700 font-medium hover:underline">Voir tout</button>
                     </div>
                     <div className="space-y-1">
-                        <ActivityItem
-                            title="Nouveau professeur ajouté: M. SOSSOU"
-                            time="Il y a 10 min"
-                            type="info"
-                        />
-                        <ActivityItem
-                            title="Saisie de notes: 3ème M1 - Mathématiques"
-                            time="Il y a 45 min"
-                            type="success"
-                        />
-                        <ActivityItem
-                            title="Conseil de classe programmé: 6ème M2"
-                            time="Il y a 2h"
-                            type="warning"
-                        />
-                        <ActivityItem
-                            title="Mise à jour emploi du temps: Prof. AGBOSSA"
-                            time="Il y a 4h"
-                            type="info"
-                        />
+                        {activities.length > 0 ? activities.map(act => (
+                            <ActivityItem
+                                key={act.id}
+                                title={act.title}
+                                time={act.time}
+                                type={act.type}
+                            />
+                        )) : (
+                            <div className="text-center py-8 text-gray-400 text-sm">
+                                Aucune activité récente
+                            </div>
+                        )}
                     </div>
                 </Card>
 
                 <Card className="h-full">
                     <div className="flex items-center justify-between mb-6">
                         <h2 className="text-xl font-bold text-gray-900">Alertes Rapides</h2>
-                        <Badge variant="danger">3 Actions requises</Badge>
+                        {alerts.length > 0 && <Badge variant="danger">{alerts.length} Action{alerts.length > 1 ? 's' : ''} requise{alerts.length > 1 ? 's' : ''}</Badge>}
                     </div>
                     <div className="space-y-4">
-                        <motion.div variants={item} className="p-4 bg-orange-50/50 rounded-xl border border-orange-100 flex items-start space-x-3 hover:shadow-sm transition-shadow">
-                            <AlertCircle className="w-5 h-5 text-orange-500 flex-shrink-0 mt-0.5" />
-                            <div>
-                                <h3 className="text-sm font-bold text-orange-800">Bulletin trimestriel manquant</h3>
-                                <p className="text-sm text-orange-700 mt-1 leading-relaxed">La classe de 5ème M2 n'a pas encore finalisé les bulletins.</p>
+                        {alerts.length > 0 ? alerts.map(alert => (
+                            <motion.div key={alert.id} variants={item} className={`p-4 ${alert.variant === 'warning' ? 'bg-orange-50/50 border-orange-100' : 'bg-blue-50/50 border-blue-100'} rounded-xl border flex items-start space-x-3 hover:shadow-sm transition-shadow`}>
+                                <AlertCircle className={`w-5 h-5 ${alert.variant === 'warning' ? 'text-orange-500' : 'text-blue-500'} flex-shrink-0 mt-0.5`} />
+                                <div>
+                                    <h3 className={`text-sm font-bold ${alert.variant === 'warning' ? 'text-orange-800' : 'text-blue-800'}`}>{alert.title}</h3>
+                                    <p className={`text-sm ${alert.variant === 'warning' ? 'text-orange-700' : 'text-blue-700'} mt-1 leading-relaxed`}>{alert.desc}</p>
+                                </div>
+                            </motion.div>
+                        )) : (
+                            <div className="text-center py-8 text-green-500 text-sm font-medium">
+                                ✨ Tout est à jour !
                             </div>
-                        </motion.div>
-                        <motion.div variants={item} className="p-4 bg-blue-50/50 rounded-xl border border-blue-100 flex items-start space-x-3 hover:shadow-sm transition-shadow">
-                            <AlertCircle className="w-5 h-5 text-blue-500 flex-shrink-0 mt-0.5" />
-                            <div>
-                                <h3 className="text-sm font-bold text-blue-800">Réunion des professeurs</h3>
-                                <p className="text-sm text-blue-700 mt-1 leading-relaxed">Prévue pour le vendredi 10 Février à 16h.</p>
-                            </div>
-                        </motion.div>
+                        )}
                     </div>
                 </Card>
             </div>
