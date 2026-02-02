@@ -84,6 +84,7 @@ const Settings = () => {
         lockSemester2,
         lockYear,
         evaluationPeriods, setEvaluationPeriods,
+        updateEvaluationPeriod, // Added
         calculationPeriod, setCalculationPeriod,
         isGradingOpen,
         addAcademicYear
@@ -218,7 +219,21 @@ const Settings = () => {
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {Object.entries(evaluationPeriods).map(([key, dates]) => {
-                                        const isOpen = !dates.end || new Date() <= new Date(dates.end).setHours(23, 59, 59);
+                                        // Logic: MUST be unlocked (true) AND (Either no date set OR within date range)
+                                        // But if unlocked=true and date=past -> Closed.
+                                        // If unlocked=false -> Closed.
+
+                                        const isWithinDates = !dates.end || new Date() <= new Date(dates.end).setHours(23, 59, 59);
+                                        // Default is_unlocked to true if not present for legacy, but strictly it should come from DB now.
+                                        // If undefined, assume locked or handle gracefully?
+                                        // Given the issue, we default to dates.dates.is_unlocked
+
+                                        const isUnlocked = dates.is_unlocked !== false; // Default true if undefined? No, context sets default to false.
+                                        // Checking context default: { start: '', end: '', is_unlocked: false }
+                                        // So default is FALSE.
+
+                                        const isOpen = dates.is_unlocked && isWithinDates;
+
                                         return (
                                             <tr key={key} className="hover:bg-gray-50 transition-colors">
                                                 <td className="px-4 py-3 font-medium text-gray-800">{PERIOD_LABELS[key]}</td>
@@ -226,10 +241,7 @@ const Settings = () => {
                                                     <input
                                                         type="date"
                                                         value={dates.start}
-                                                        onChange={(e) => setEvaluationPeriods({
-                                                            ...evaluationPeriods,
-                                                            [key]: { ...dates, start: e.target.value }
-                                                        })}
+                                                        onChange={(e) => updateEvaluationPeriod(key, { start: e.target.value })}
                                                         className="w-full bg-transparent border border-gray-200 rounded px-2 py-1 outline-none focus:border-blue-500"
                                                     />
                                                 </td>
@@ -237,17 +249,18 @@ const Settings = () => {
                                                     <input
                                                         type="date"
                                                         value={dates.end}
-                                                        onChange={(e) => setEvaluationPeriods({
-                                                            ...evaluationPeriods,
-                                                            [key]: { ...dates, end: e.target.value }
-                                                        })}
+                                                        onChange={(e) => updateEvaluationPeriod(key, { end: e.target.value })}
                                                         className="w-full bg-transparent border border-gray-200 rounded px-2 py-1 outline-none focus:border-blue-500"
                                                     />
                                                 </td>
                                                 <td className="px-4 py-3 text-center">
-                                                    <span className={`text-xs px-2 py-1 rounded-full ${isOpen ? 'bg-green-100 text-green-700' : 'bg-red-100 text-red-700'}`}>
+                                                    <button
+                                                        onClick={() => updateEvaluationPeriod(key, { is_unlocked: !dates.is_unlocked })}
+                                                        className={`text-xs px-2 py-1 rounded-full border transition-colors cursor-pointer ${isOpen ? 'bg-green-100 text-green-700 border-green-200' : 'bg-red-100 text-red-700 border-red-200'}`}
+                                                        title="Cliquez pour verrouiller/déverrouiller"
+                                                    >
                                                         {isOpen ? 'Ouverte' : 'Fermée'}
-                                                    </span>
+                                                    </button>
                                                 </td>
                                             </tr>
                                         );

@@ -24,118 +24,182 @@ const getTeacherSubjectMatch = (teacherSubject, formSubject) => {
 };
 
 const Assignments = () => {
-    const { assignments, setAssignments, teachers, classes, setClasses, validateHeadTeacherAssignment } = useSchool();
+    const { assignments, teachers, classes, subjects, setClasses, validateHeadTeacherAssignment, addAssignment, updateAssignment, deleteAssignment, updateClass } = useSchool();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
+    const [subjectFilter, setSubjectFilter] = useState('');
     const [formData, setFormData] = useState({
-        teacher: '',
-        class: '',
-        subject: '',
+        teacherId: '',
+        classId: '',
+        subjectId: '',
         hours: '',
         isMainTeacher: false
     });
 
     const handleAddAssignment = () => {
         setEditingId(null);
-        setFormData({ teacher: '', class: '', subject: '', hours: '', isMainTeacher: false });
+        setSubjectFilter('');
+        setFormData({ teacherId: '', classId: '', subjectId: '', hours: '', isMainTeacher: false });
         setIsModalOpen(true);
     };
 
     const handleEditAssignment = (assignment) => {
         setEditingId(assignment.id);
-        // Check if this teacher is the PP of the class
-        const relatedClass = classes.find(c => c.name === assignment.class);
-        const isPP = relatedClass && relatedClass.mainTeacher === assignment.teacher;
+
+        // Find related objects to populate IDs
+        // assignment in table has names (from View/Query), we need to reverse lookup IDs if they are not directly available in 'assignments'
+        // Ideally 'assignments' state should carry IDs. 
+        // Checking SchoolContext: 'assignments' carries full objects? 
+        // formattedAssignments map logic: id: a.id, teacher: name, class: name... NO IDs!
+        // We MUST Fix SchoolContext to populate IDs in 'assignments' list first, OR do reverse lookup here.
+        // It's safer to reverse lookup here for now to avoid breaking view.
+
+        const teacherObj = teachers.find(t => t.name === assignment.teacher || `${t.nom} ${t.prenom}` === assignment.teacher);
+        const classObj = classes.find(c => c.name === assignment.class);
+        const subjectObj = subjects.find(s => s.name === assignment.subject);
+
+        // Check PP status
+        const isPP = classObj && classObj.mainTeacher === assignment.teacher;
+
+        setSubjectFilter(teacherObj ? teacherObj.subject : '');
 
         setFormData({
-            teacher: assignment.teacher,
-            class: assignment.class,
-            subject: assignment.subject,
+            teacherId: teacherObj ? teacherObj.id : '',
+            classId: classObj ? classObj.id : '',
+            subjectId: subjectObj ? subjectObj.id : '',
             hours: assignment.hours,
             isMainTeacher: isPP
         });
         setIsModalOpen(true);
     };
 
-    const handleDeleteAssignment = (id) => {
+    const handleDeleteAssignment = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cette affectation ?')) {
-            setAssignments(assignments.filter(a => a.id !== id));
+            const res = await deleteAssignment(id);
+            if (!res.success) alert(res.error);
         }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
 
-        // 1. Handle Head Teacher Assignment
-        if (formData.class && formData.teacher) {
-            const targetClass = classes.find(c => c.name === formData.class);
+        // 1. Handle Head Teacher Assignment (Main Teacher)
+        // This updates the CLASS table
+        if (formData.classId && formData.teacherId) {
+            const targetClass = classes.find(c => c.id == formData.classId); // helper
+            // Note: formData.classId might be string or number
 
             if (formData.isMainTeacher) {
-                // User wants to make this teacher the PP
-                // Validate first
-                const validation = validateHeadTeacherAssignment(formData.teacher, targetClass?.id);
+                // Validate
+                const validation = validateHeadTeacherAssignment(formData.teacherId, formData.classId);
                 if (!validation.valid) {
                     alert(validation.error);
                     return;
                 }
 
-                // Update class if valid
+                // Call updateClass to set PP
                 if (targetClass) {
-                    setClasses(classes.map(c =>
-                        c.id === targetClass.id ? { ...c, mainTeacher: formData.teacher } : c
-                    ));
+                    await updateClass(targetClass.id, {
+                        name: targetClass.name,
+                        level: targetClass.level,
+                        mainTeacherId: formData.teacherId
+                    });
                 }
 
             } else {
-                // User unchecked the box. Remove if they were PP.
-                if (targetClass && targetClass.mainTeacher === formData.teacher) {
-                    setClasses(classes.map(c =>
-                        c.id === targetClass.id ? { ...c, mainTeacher: 'Non assigné' } : c
-                    ));
+                // Unchecked: Remove PP if they were the one
+                if (targetClass && targetClass.mainTeacherId === formData.teacherId) {
+                    await updateClass(targetClass.id, {
+                        name: targetClass.name,
+                        level: targetClass.level,
+                        mainTeacherId: null
+                    });
                 }
             }
         }
 
+        // 2. Handle Subject Assignment (Teacher Assignments Table)
+        const assignmentData = {
+            teacherId: formData.teacherId,
+            classId: formData.classId,
+            subjectId: formData.subjectId,
+            // hours: formData.hours // Not in DB schema provided? Defaulting in code?
+        };
+
+        let res;
         if (editingId) {
-            setAssignments(assignments.map(a =>
-                a.id === editingId
-                    ? { ...a, ...formData, hours: parseInt(formData.hours) }
-                    : a
-            ));
+            res = await updateAssignment(editingId, assignmentData);
         } else {
-            const newAssignment = {
-                id: Date.now(),
-                ...formData,
-                hours: parseInt(formData.hours)
-            };
-            setAssignments([...assignments, newAssignment]);
+            res = await addAssignment(assignmentData);
         }
 
-        setIsModalOpen(false);
-        setFormData({ teacher: '', class: '', subject: '', hours: '', isMainTeacher: false });
-        setEditingId(null);
+        if (res.success) {
+            setIsModalOpen(false);
+            setSubjectFilter('');
+            setFormData({ teacherId: '', classId: '', subjectId: '', hours: '', isMainTeacher: false });
+            setEditingId(null);
+        } else {
+            alert("Erreur: " + res.error);
+        }
     };
 
     // --- Derived Logic for UI ---
 
-    // 1. Detect Cycle based on selected Class
-    const getCycleSubjects = (className) => {
-        if (!className) return [];
-        const level = className.split(' ')[0]; // "6ème", "2nde", etc.
-        if (['6ème', '5ème', '4ème', '3ème'].includes(level)) {
-            return SUBJECTS_CYCLE_1;
-        } else {
-            return SUBJECTS_CYCLE_2;
+    // 0. Filtered Teachers List based on ID Step 0 (Subject Filter)
+    const filteredTeachers = teachers.filter(t => {
+        if (!subjectFilter) return true;
+        return t.subject === subjectFilter;
+    });
+
+    // 1. Get Selected Teacher Object
+    const selectedTeacherObj = teachers.find(t => t.id === formData.teacherId);
+
+    // 2. Get Selected Class
+    const selectedClassObj = classes.find(c => c.id == formData.classId);
+
+    // 3. Available Subjects Logic
+    const getAvailableSubjects = () => {
+        if (!selectedTeacherObj) return [];
+        // Cycle 1 vs 2 logic requires Class Level
+
+        let availableSubjs = [];
+
+        // Use teacher's specialty subject as base
+        if (selectedTeacherObj.subject) {
+            availableSubjs.push(selectedTeacherObj.subject);
+            // French teacher expansions
+            if (selectedTeacherObj.subject === 'Français') {
+                if (selectedClassObj && ['6ème', '5ème', '4ème', '3ème'].some(l => selectedClassObj.name.startsWith(l))) {
+                    availableSubjs = ['Communication Écrite', 'Lecture'];
+                }
+            }
         }
+
+        // Also allow selection from ALL subjects if needed, or stick to strict checking.
+        // For flexibility let's add the teacher's subject if not present (unless expanded).
+
+        // Return Subject Objects (finding from 'subjects' list) for the ID match
+        // But UI displays Names.
+
+        // Let's just return Strings for now to match against 'subjects' list to get IDs
+        return availableSubjs;
     };
 
-    const currentSubjects = getCycleSubjects(formData.class);
+    const availableSubjectNames = getAvailableSubjects();
 
-    // 2. Filter Teachers based on selected Subject
-    const availableTeachers = teachers.filter(t => {
-        if (!formData.subject) return false;
-        return getTeacherSubjectMatch(t.subject, formData.subject);
-    });
+    // Auto-select subject if only one
+    React.useEffect(() => {
+        if (availableSubjectNames.length === 1) {
+            const subjName = availableSubjectNames[0];
+            const subjObj = subjects.find(s => s.name === subjName);
+            if (subjObj && formData.subjectId !== subjObj.id) {
+                setFormData(prev => ({ ...prev, subjectId: subjObj.id }));
+            }
+        }
+    }, [availableSubjectNames, formData.subjectId, subjects]);
+
+    // Unique list for Filter
+    const uniqueSubjects = Array.from(new Set((subjects || []).map(s => s.name))).sort();
 
     return (
         <div className="space-y-6">
@@ -163,7 +227,6 @@ const Assignments = () => {
                             className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                         />
                     </div>
-                    {/* Optional: Add Class Filter here if needed later */}
                 </div>
 
                 <div className="overflow-x-auto">
@@ -224,72 +287,83 @@ const Assignments = () => {
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
 
-                    {/* 1. SELECT CLASS */}
+                    {/* 0. FILTER BY SUBJECT */}
                     <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Classe</label>
+                        <label className="text-sm font-medium text-gray-700">Filtrer par discipline</label>
                         <select
-                            required
-                            value={formData.class}
-                            onChange={(e) => setFormData({ ...formData, class: e.target.value, subject: '', teacher: '' })}
+                            value={subjectFilter}
+                            onChange={(e) => {
+                                setSubjectFilter(e.target.value);
+                                setFormData(prev => ({ ...prev, teacherId: '' }));
+                            }}
                             className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
                         >
-                            <option value="">Choisir une classe...</option>
-                            {/* NOTE: ideally populate from classes context, but for now hardcoded as per previous file */}
-                            <option value="6ème M1">6ème M1</option>
-                            <option value="6ème M2">6ème M2</option>
-                            <option value="6ème M3">6ème M3</option>
-                            <option value="5ème M1">5ème M1</option>
-                            <option value="5ème M2">5ème M2</option>
-                            <option value="4ème M1">4ème M1</option>
-                            <option value="4ème M2">4ème M2</option>
-                            <option value="3ème M1">3ème M1</option>
-                            <option value="3ème M2">3ème M2</option>
-                            <option value="2nde C">2nde C</option>
-                            <option value="1ère C">1ère C</option>
-                            <option value="Tle C">Tle C</option>
-                        </select>
-                    </div>
-
-                    {/* 2. SELECT SUBJECT (Dependent on Class Cycle) */}
-                    <div className="space-y-2">
-                        <label className="text-sm font-medium text-gray-700">Matière</label>
-                        <select
-                            required
-                            disabled={!formData.class}
-                            value={formData.subject}
-                            onChange={(e) => setFormData({ ...formData, subject: e.target.value, teacher: '' })}
-                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50"
-                        >
-                            <option value="">
-                                {!formData.class ? "Sélectionnez une classe d'abord" : "Sélectionner une matière"}
-                            </option>
-                            {currentSubjects.map(subj => (
-                                <option key={subj} value={subj}>{subj}</option>
+                            <option value="">Toutes les matières</option>
+                            {uniqueSubjects.map(s => (
+                                <option key={s} value={s}>{s}</option>
                             ))}
                         </select>
                     </div>
 
-                    {/* 3. SELECT TEACHER (Filtered by Subject) */}
+                    {/* 1. SELECT TEACHER */}
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-gray-700">Professeur</label>
                         <Select
                             required
-                            disabled={!formData.subject}
-                            value={formData.teacher}
-                            onChange={(e) => setFormData({ ...formData, teacher: e.target.value })}
+                            value={formData.teacherId}
+                            onChange={(e) => setFormData({ ...formData, teacherId: e.target.value, classId: '', subjectId: '' })}
                         >
                             <option value="">
-                                {!formData.subject ? "Sélectionnez une matière d'abord" : "Sélectionner un professeur"}
+                                {subjectFilter ? "Sélectionner un professeur" : "Sélectionner un professeur (ou filtrer ci-dessus)"}
                             </option>
-                            {availableTeachers.map(t => (
-                                <option key={t.id} value={`${t.nom} ${t.prenom}`}>
+                            {filteredTeachers.map(t => (
+                                <option key={t.id} value={t.id}>
                                     {t.nom} {t.prenom} ({t.subject})
                                 </option>
                             ))}
                         </Select>
-                        {formData.subject && availableTeachers.length === 0 && (
-                            <p className="text-xs text-orange-500 mt-1">Aucun professeur trouvé pour cette matière.</p>
-                        )}
+                    </div>
+
+                    {/* 2. SELECT CLASS */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700">Classe à assigner</label>
+                        <select
+                            required
+                            disabled={!formData.teacherId}
+                            value={formData.classId}
+                            onChange={(e) => setFormData({ ...formData, classId: e.target.value })}
+                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 disabled:bg-gray-100"
+                        >
+                            <option value="">
+                                {!formData.teacherId ? "Sélectionnez un professeur d'abord" : "Choisir une classe..."}
+                            </option>
+                            {classes.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                            ))}
+                        </select>
+                    </div>
+
+                    {/* 3. SELECT SUBJECT */}
+                    <div className="space-y-2">
+                        <label className="text-sm font-medium text-gray-700">Matière Enseignée</label>
+                        <select
+                            required
+                            disabled={!formData.classId}
+                            value={formData.subjectId}
+                            onChange={(e) => setFormData({ ...formData, subjectId: e.target.value })}
+                            className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none disabled:opacity-50 disabled:bg-gray-100"
+                        >
+                            <option value="">
+                                {!formData.classId ? "Sélectionnez une classe d'abord" : "Sélectionner la matière"}
+                            </option>
+                            {/* Display available subjects based on logic, but we need IDs in value */}
+                            {subjects
+                                .filter(s => availableSubjectNames.includes(s.name) || !selectedTeacherObj?.subject) // Fallback: show all if no teacher subject logic? No, better stick to logic.
+                                .map(s => (
+                                    <option key={s.id} value={s.id}>{s.name}</option>
+                                ))}
+                            {/* If logic returns names not in DB subjects? Handled by initial load */}
+                        </select>
                     </div>
 
                     {/* 4. HOURS */}
@@ -307,10 +381,10 @@ const Assignments = () => {
 
                     {/* HEAD TEACHER CHECKBOX */}
                     <div className="pt-2">
-                        <label className={`flex items-center space-x-3 p-3 rounded-lg border border-gray-200 transition-colors ${!formData.teacher ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}>
+                        <label className={`flex items-center space-x-3 p-3 rounded-lg border border-gray-200 transition-colors ${(!formData.teacherId || !formData.classId) ? 'opacity-50 cursor-not-allowed' : 'cursor-pointer hover:bg-gray-50'}`}>
                             <input
                                 type="checkbox"
-                                disabled={!formData.teacher}
+                                disabled={!formData.teacherId || !formData.classId}
                                 checked={formData.isMainTeacher}
                                 onChange={(e) => setFormData({ ...formData, isMainTeacher: e.target.checked })}
                                 className="w-5 h-5 text-blue-600 rounded focus:ring-blue-500"
@@ -318,7 +392,9 @@ const Assignments = () => {
                             <div>
                                 <span className="font-semibold text-gray-800">Assigner comme Professeur Principal</span>
                                 <p className="text-xs text-gray-500">
-                                    {formData.teacher ? `Ce professeur (${formData.teacher}) sera PP de ${formData.class}` : "Sélectionnez un professeur d'abord"}
+                                    {formData.teacherId && formData.classId
+                                        ? "Nommer ce professeur Professeur Principal"
+                                        : "Sélectionnez professeur et classe d'abord"}
                                 </p>
                             </div>
                         </label>

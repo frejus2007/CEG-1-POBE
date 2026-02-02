@@ -7,8 +7,8 @@ import { generateRandomStudents, exportToExcel, formatStudentForExport } from '.
 
 const Students = () => {
     const { isYearLocked, isArchiveView, selectedYear } = useAcademicYear();
-    const { students, setStudents } = useSchool();
-    
+    const { students, classes, addStudent, updateStudent, deleteStudent } = useSchool();
+
     const [viewStudents, setViewStudents] = useState([]);
     const [filterClass, setFilterClass] = useState(''); // State for filtering
     const [searchQuery, setSearchQuery] = useState('');
@@ -25,7 +25,7 @@ const Students = () => {
         } else {
             data = students;
         }
-        
+
         // Apply Filters (Class & Search)
         let filtered = data;
         if (filterClass) {
@@ -33,9 +33,9 @@ const Students = () => {
         }
         if (searchQuery) {
             const q = searchQuery.toLowerCase();
-            filtered = filtered.filter(s => 
-                (s.nom && s.nom.toLowerCase().includes(q)) || 
-                (s.prenom && s.prenom.toLowerCase().includes(q)) || 
+            filtered = filtered.filter(s =>
+                (s.nom && s.nom.toLowerCase().includes(q)) ||
+                (s.prenom && s.prenom.toLowerCase().includes(q)) ||
                 (s.matricule && s.matricule.toLowerCase().includes(q))
             );
         }
@@ -49,7 +49,7 @@ const Students = () => {
         nom: '',
         prenom: '',
         matricule: '',
-        class: '6ème M1',
+        class: '', // Remove hardcoded default
         dob: ''
     });
 
@@ -59,7 +59,7 @@ const Students = () => {
             nom: '',
             prenom: '',
             matricule: '',
-            class: '6ème M1',
+            class: '', // Remove hardcoded default
             dob: ''
         });
         setIsModalOpen(true);
@@ -67,7 +67,7 @@ const Students = () => {
 
     const handleEditStudent = (student) => {
         setEditingId(student.id);
-        
+
         let formattedDob = student.dob;
         if (student.dob && student.dob.includes('/')) {
             const [day, month, year] = student.dob.split('/');
@@ -84,46 +84,51 @@ const Students = () => {
         setIsModalOpen(true);
     };
 
-    const handleDeleteStudent = (id) => {
+    const handleDeleteStudent = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cet élève ?')) {
-            setStudents(students.filter(s => s.id !== id));
+            await deleteStudent(id);
         }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
 
+        // Convert UI Date (YYYY-MM-DD or DD/MM/YYYY?) 
+        // Input type="date" yields YYYY-MM-DD usually.
         let dobFormatted = formData.dob;
-        if (formData.dob.includes('-')) {
-            const [y, m, d] = formData.dob.split('-');
-            dobFormatted = `${d}/${m}/${y}`;
-        }
 
+        // Supabase expects YYYY-MM-DD for date type. 
+        // If formData.dob is from input type="date", it is already YYYY-MM-DD.
+        // We just pass it through.
+
+        const studentPayload = {
+            nom: formData.nom,
+            prenom: formData.prenom,
+            matricule: formData.matricule,
+            className: formData.class, // Passing name, context looks up ID
+            dob: dobFormatted
+        };
+
+        let res;
         if (editingId) {
-            setStudents(students.map(s =>
-                s.id === editingId
-                    ? { ...s, ...formData, dob: dobFormatted }
-                    : s
-            ));
+            res = await updateStudent(editingId, studentPayload);
         } else {
-            const newStudent = {
-                id: Date.now(),
-                ...formData,
-                dob: dobFormatted,
-                avg: 0 
-            };
-            setStudents([...students, newStudent]);
+            res = await addStudent(studentPayload);
         }
 
-        setIsModalOpen(false);
-        setFormData({
-            nom: '',
-            prenom: '',
-            matricule: '',
-            class: '6ème M1',
-            dob: ''
-        });
-        setEditingId(null);
+        if (res.success) {
+            setIsModalOpen(false);
+            setFormData({
+                nom: '',
+                prenom: '',
+                matricule: '',
+                class: '6ème M1',
+                dob: ''
+            });
+            setEditingId(null);
+        } else {
+            alert("Erreur: " + res.error);
+        }
     };
 
     // EXPORT FUNCTION
@@ -141,7 +146,7 @@ const Students = () => {
                     <p className="text-gray-500 mt-1">Liste complète des élèves inscrits cette année</p>
                 </div>
                 <div className="flex items-center space-x-3">
-                    <button 
+                    <button
                         onClick={handleExport}
                         className="flex items-center justify-center space-x-2 bg-white border border-gray-200 text-gray-700 px-4 py-2 rounded-xl hover:bg-gray-50 transition-colors"
                     >
@@ -173,21 +178,16 @@ const Students = () => {
                         />
                     </div>
                     {/* Filter by class UI */}
-                     <div className="relative">
+                    <div className="relative">
                         <select
                             value={filterClass}
                             onChange={(e) => setFilterClass(e.target.value)}
                             className="appearance-none pl-3 pr-8 py-2 bg-gray-50 border border-gray-200 rounded-lg text-sm font-medium text-gray-700 outline-none hover:bg-gray-100 cursor-pointer"
                         >
                             <option value="">Toutes les classes</option>
-                            <option value="6ème M1">6ème M1</option>
-                            <option value="6ème M2">6ème M2</option>
-                            <option value="5ème M1">5ème M1</option>
-                            <option value="5ème M2">5ème M2</option>
-                            <option value="4ème M1">4ème M1</option>
-                            <option value="4ème M2">4ème M2</option>
-                            <option value="3ème M1">3ème M1</option>
-                            <option value="3ème M2">3ème M2</option>
+                            {classes && classes.map(c => (
+                                <option key={c.id} value={c.name}>{c.name}</option>
+                            ))}
                         </select>
                         <Filter className="w-4 h-4 text-gray-400 absolute right-2.5 top-1/2 transform -translate-y-1/2 pointer-events-none" />
                     </div>
@@ -273,7 +273,7 @@ const Students = () => {
             >
                 <form onSubmit={handleSubmit} className="space-y-4">
                     {/* Form fields same as before... re-including for completeness */}
-                     <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700">Nom</label>
                             <input type="text" required value={formData.nom} onChange={(e) => setFormData({ ...formData, nom: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Nom" />
@@ -283,29 +283,29 @@ const Students = () => {
                             <input type="text" required value={formData.prenom} onChange={(e) => setFormData({ ...formData, prenom: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" placeholder="Prénom" />
                         </div>
                     </div>
-                     <div className="grid grid-cols-2 gap-4">
+                    <div className="grid grid-cols-2 gap-4">
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700">Matricule</label>
-                             <input type="text" required value={formData.matricule} onChange={(e) => setFormData({ ...formData, matricule: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                            <input type="text" required value={formData.matricule} onChange={(e) => setFormData({ ...formData, matricule: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
-                         <div className="space-y-2">
+                        <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700">Classe</label>
-                            <select value={formData.class} onChange={(e) => setFormData({ ...formData, class: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none">
-                                <option value="6ème M1">6ème M1</option>
-                                <option value="6ème M2">6ème M2</option>
-                                <option value="5ème M1">5ème M1</option>
-                                <option value="5ème M2">5ème M2</option>
-                                <option value="4ème M1">4ème M1</option>
-                                <option value="4ème M2">4ème M2</option>
-                                <option value="3ème M1">3ème M1</option>
-                                <option value="3ème M2">3ème M2</option>
+                            <select
+                                value={formData.class}
+                                onChange={(e) => setFormData({ ...formData, class: e.target.value })}
+                                className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none"
+                            >
+                                <option value="">Sélectionner une classe</option>
+                                {classes && classes.map(c => (
+                                    <option key={c.id} value={c.name}>{c.name}</option>
+                                ))}
                             </select>
                         </div>
                     </div>
-                     <div className="grid grid-cols-1 gap-4">
+                    <div className="grid grid-cols-1 gap-4">
                         <div className="space-y-2">
                             <label className="text-sm font-medium text-gray-700">Date de naissance</label>
-                             <input type="date" required value={formData.dob} onChange={(e) => setFormData({ ...formData, dob: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
+                            <input type="date" required value={formData.dob} onChange={(e) => setFormData({ ...formData, dob: e.target.value })} className="w-full px-3 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none" />
                         </div>
                     </div>
                     <div className="pt-4 flex justify-end space-x-3">

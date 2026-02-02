@@ -1,5 +1,6 @@
 import React from 'react';
-import { NavLink } from 'react-router-dom';
+import { NavLink, useNavigate } from 'react-router-dom';
+import { useSchool } from '../context/SchoolContext';
 import {
     LayoutDashboard,
     Users,
@@ -17,6 +18,9 @@ import {
 import clsx from 'clsx';
 
 const Sidebar = () => {
+    const navigate = useNavigate();
+    const { logout } = useSchool();
+
     const navItems = [
         { icon: LayoutDashboard, label: 'Tableau de bord', path: '/dashboard' },
         { icon: Users, label: 'Professeurs', path: '/teachers' },
@@ -77,7 +81,13 @@ const Sidebar = () => {
                     <Settings className="w-5 h-5 text-gray-400" />
                     <span>Paramètres</span>
                 </NavLink>
-                <button className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors">
+                <button
+                    onClick={async () => {
+                        await logout();
+                        navigate('/login');
+                    }}
+                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
+                >
                     <LogOut className="w-5 h-5" />
                     <span>Déconnexion</span>
                 </button>

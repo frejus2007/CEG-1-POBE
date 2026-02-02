@@ -1,62 +1,68 @@
-import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
-import { createClient } from "https://esm.sh/@supabase/supabase-js@2.0.0"
+import { createClient } from "npm:@supabase/supabase-js@2"
 
 const corsHeaders = {
     'Access-Control-Allow-Origin': '*',
     'Access-Control-Allow-Headers': 'authorization, x-client-info, apikey, content-type',
 }
 
-serve(async (req) => {
-    // Handle CORS
+Deno.serve(async (req) => {
+    // 1. Gérer le CORS
     if (req.method === 'OPTIONS') {
         return new Response('ok', { headers: corsHeaders })
     }
 
     try {
-        // 1. Create Supabase Client with Service Role Key (Admin)
-        // The browser passes the Anon Key, but we need Admin rights to create users.
-        // We expect SUPABASE_SERVICE_ROLE_KEY to be set in the Function Secrets.
-        const supabaseAdmin = createClient(
-            Deno.env.get('SUPABASE_URL') ?? '',
-            Deno.env.get('SERVICE_ROLE_KEY') ?? ''
-        )
+        // CORRECTION IMPORTANTE: On utilise npm: pour plus de stabilité si esm.sh flanche
+        const supabaseUrl = 'https://lnyqpzsrcmcmkngbcyqn.supabase.co'
+        const supabaseServiceKey = 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6ImxueXFwenNyY21jbWtuZ2JjeXFuIiwicm9sZSI6InNlcnZpY2Vfcm9sZSIsImlhdCI6MTc2OTk0MjM5MywiZXhwIjoyMDg1NTE4MzkzfQ.bP6V_97hBHyhgl-aCF2bVvk_QOvLphSrvW3pN2bGtNI'
 
-        // 2. Parse Request Body
-        const { email, password, userData } = await req.json()
+        const supabaseAdmin = createClient(supabaseUrl, supabaseServiceKey)
 
-        if (!email || !password) {
-            throw new Error('Email and Password are required')
+        // 2. Lire le body (avec gestion cas vide)
+        let body
+        try {
+            body = await req.json()
+        } catch (e) {
+            throw new Error("Body invalide ou vide")
         }
 
-        // 3. Create Auth User
+        const { email, password, userData } = body
+
+        if (!email || !password) throw new Error('Email et mot de passe requis')
+
+        console.log("Creating user:", email)
+
+        // 3. Créer l'utilisateur (Auth)
         const { data: authData, error: authError } = await supabaseAdmin.auth.admin.createUser({
             email: email,
             password: password,
-            email_confirm: true, // Auto-confirm for admin-created users
-            user_metadata: {
-                full_name: `${userData.nom} ${userData.prenom}`
-            }
+            email_confirm: true,
+            user_metadata: { full_name: `${userData.nom} ${userData.prenom}` }
         })
 
-        if (authError) throw authError
+        if (authError) {
+            console.error("Auth Error:", authError)
+            throw authError
+        }
 
         const userId = authData.user.id
 
-        // 4. Create Profile Record
-        // We explicitly insert into 'profiles' using the new User ID
+        // 4. Créer ou Mettre à jour le profil (car le Trigger peut l'avoir déjà créé)
         const { error: profileError } = await supabaseAdmin
             .from('profiles')
-            .insert({
+            .upsert({
                 id: userId,
                 full_name: `${userData.nom} ${userData.prenom}`,
                 email: email,
                 phone: userData.phone,
-                specialty_subject_id: userData.subjectId, // Expecting ID here
-                role: 'TEACHER'
+                specialty_subject_id: userData.subjectId,
+                role: 'TEACHER',
+                is_approved: true // Censeur creates it, so it's approved by default
             })
 
         if (profileError) {
-            // Rollback: Delete the user if profile creation fails (optional but good practice)
+            console.error("Profile Error:", profileError)
+            // Rollback
             await supabaseAdmin.auth.admin.deleteUser(userId)
             throw profileError
         }
@@ -67,9 +73,10 @@ serve(async (req) => {
         )
 
     } catch (error) {
+        console.error("Global Error:", error)
         return new Response(
             JSON.stringify({ success: false, error: error.message }),
-            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 }
+            { headers: { ...corsHeaders, 'Content-Type': 'application/json' }, status: 200 } // On renvoie 200 pour que le client lise l'erreur JSON
         )
     }
 })

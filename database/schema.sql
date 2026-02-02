@@ -12,7 +12,7 @@ CREATE TABLE IF NOT EXISTS profiles (
     full_name VARCHAR(100) NOT NULL,
     email VARCHAR(150) UNIQUE NOT NULL,
     role VARCHAR(20) CHECK (role IN ('TEACHER', 'PRINCIPAL_TEACHER', 'CENSEUR')) DEFAULT 'TEACHER',
-    specialty_subject_id INTEGER, -- Voir table subjects
+    specialty_subject_id INTEGER REFERENCES subjects(id), -- Voir table subjects
     phone VARCHAR(20),
     fcm_token TEXT, -- Token pour Firebase Cloud Messaging
     created_at TIMESTAMP WITH TIME ZONE DEFAULT NOW()

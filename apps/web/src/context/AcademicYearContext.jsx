@@ -1,4 +1,5 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
+import { supabase } from '../lib/supabase';
 
 const AcademicYearContext = createContext();
 
@@ -27,17 +28,15 @@ export const AcademicYearProvider = ({ children }) => {
     const [isSemester2Locked, setIsSemester2Locked] = useState(() => localStorage.getItem('isSemester2Locked') === 'true');
     const [isYearLocked, setIsYearLocked] = useState(() => localStorage.getItem('isYearLocked') === 'true');
 
-    // Deadline State
-    const [evaluationPeriods, setEvaluationPeriods] = useState(() => {
-        const stored = localStorage.getItem('evaluationPeriods');
-        return stored ? JSON.parse(stored) : {
-            interrogation1: { start: '', end: '' },
-            interrogation2: { start: '', end: '' },
-            interrogation3: { start: '', end: '' },
-            devoir1: { start: '', end: '' },
-            devoir2: { start: '', end: '' },
-        };
+    // Deadline State - Synced with DB 'censor_unlocks'
+    const [evaluationPeriods, setEvaluationPeriods] = useState({
+        interrogation1: { start: '', end: '', is_unlocked: false },
+        interrogation2: { start: '', end: '', is_unlocked: false },
+        interrogation3: { start: '', end: '', is_unlocked: false },
+        devoir1: { start: '', end: '', is_unlocked: false },
+        devoir2: { start: '', end: '', is_unlocked: false },
     });
+    const [loadingPeriods, setLoadingPeriods] = useState(true);
 
     const [calculationPeriod, setCalculationPeriod] = useState(() => {
         const stored = localStorage.getItem('calculationPeriod');
@@ -47,12 +46,110 @@ export const AcademicYearProvider = ({ children }) => {
     // Derived state
     const isArchiveView = academicYear !== selectedYear;
 
+    // --- FETCH PERIODS FROM DB ---
+    const fetchPeriods = async () => {
+        setLoadingPeriods(true);
+        try {
+            const { data, error } = await supabase
+                .from('censor_unlocks')
+                .select('*');
+
+            if (error) throw error;
+
+            if (data && data.length > 0) {
+                const newPeriods = { ...evaluationPeriods };
+
+                // Map DB rows to state keys
+                data.forEach(row => {
+                    const key = `${row.type.toLowerCase()}${row.index}`; // e.g., interrogation1
+                    if (newPeriods[key] !== undefined) {
+                        newPeriods[key] = {
+                            start: row.start_date || '',
+                            end: row.end_date || '',
+                            is_unlocked: row.is_unlocked
+                        };
+                    }
+                });
+                setEvaluationPeriods(newPeriods);
+            }
+        } catch (err) {
+            console.error("Error fetching evaluation periods:", err);
+        } finally {
+            setLoadingPeriods(false);
+        }
+    };
+
+    useEffect(() => {
+        fetchPeriods();
+    }, []);
+
+    // --- UPDATE DB WHEN STATE CHANGES ---
+    // Instead of auto-saving on effect (which risks loops), we'll Expose an update function
+    const updateEvaluationPeriod = async (key, updates) => {
+        // updates: { start, end, is_unlocked }
+        // 1. Update Local State
+        setEvaluationPeriods(prev => ({
+            ...prev,
+            [key]: { ...prev[key], ...updates }
+        }));
+
+        // 2. Parse key to type + index
+        let type, index;
+        if (key.startsWith('interrogation')) {
+            type = 'Interrogation';
+            index = parseInt(key.replace('interrogation', ''));
+        } else if (key.startsWith('devoir')) {
+            type = 'Devoir';
+            index = parseInt(key.replace('devoir', ''));
+        } else {
+            return;
+        }
+
+        try {
+            // Upsert into DB
+            // Check if exists first or use upsert constraint if we had unique (type, index)
+            // Assuming (type, index) is unique or we can query ID.
+            // Let's look up ID first? Or use single upsert if we defined unique constraint.
+            // Safe bet: Select, then Update or Insert.
+
+            const { data: existing } = await supabase.from('censor_unlocks').select('id').eq('type', type).eq('index', index).single();
+
+            const payload = {
+                type,
+                index,
+                is_unlocked: updates.is_unlocked !== undefined ? updates.is_unlocked : false,
+                start_date: updates.start || null,
+                end_date: updates.end || null,
+                updated_at: new Date()
+            };
+
+            if (existing) {
+                await supabase.from('censor_unlocks').update(payload).eq('id', existing.id);
+            } else {
+                await supabase.from('censor_unlocks').insert(payload);
+            }
+        } catch (err) {
+            console.error("Error updating period in DB:", err);
+        }
+    };
+
+
     // Check if grading is open for a specific type
     const isGradingOpenFor = (type) => {
         if (isArchiveView || isYearLocked) return false;
 
         const period = evaluationPeriods[type];
-        if (!period || !period.end) return true; // Open if no deadline set
+        if (!period) return false;
+
+        // Logic Change: is_unlocked is the MASTER switch.
+        // If LOCKED (false) -> Closed immediately.
+        // If UNLOCKED (true) -> Open, UNLESS dates restrict it?
+        // Usually 'locked' means 'force closed'.
+        // So:
+        if (!period.is_unlocked) return false;
+
+        // If unlocked, check dates
+        if (!period.end) return true; // Unlocked and no end date = Open forever
 
         const deadline = new Date(period.end);
         const now = new Date();
@@ -88,9 +185,9 @@ export const AcademicYearProvider = ({ children }) => {
         localStorage.setItem('isYearLocked', isYearLocked);
         localStorage.setItem('availableYears', JSON.stringify(availableYears));
         localStorage.setItem('selectedYear', selectedYear);
-        localStorage.setItem('evaluationPeriods', JSON.stringify(evaluationPeriods));
         localStorage.setItem('calculationPeriod', JSON.stringify(calculationPeriod));
-    }, [academicYear, currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, availableYears, selectedYear, evaluationPeriods, calculationPeriod]);
+        // Removed evaluationPeriods from local storage persistence
+    }, [academicYear, currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, availableYears, selectedYear, calculationPeriod]);
 
 
     // Actions
@@ -164,11 +261,11 @@ export const AcademicYearProvider = ({ children }) => {
             setIsYearLocked(false);
 
             setEvaluationPeriods({
-                interrogation1: { start: '', end: '' },
-                interrogation2: { start: '', end: '' },
-                interrogation3: { start: '', end: '' },
-                devoir1: { start: '', end: '' },
-                devoir2: { start: '', end: '' },
+                interrogation1: { start: '', end: '', is_unlocked: false },
+                interrogation2: { start: '', end: '', is_unlocked: false },
+                interrogation3: { start: '', end: '', is_unlocked: false },
+                devoir1: { start: '', end: '', is_unlocked: false },
+                devoir2: { start: '', end: '', is_unlocked: false },
             });
             setCalculationPeriod({ start: '', end: '' });
 
@@ -191,11 +288,13 @@ export const AcademicYearProvider = ({ children }) => {
         startSemester2,
         lockSemester2,
         lockYear,
-        evaluationPeriods, setEvaluationPeriods,
+        evaluationPeriods, setEvaluationPeriods, // NOTE: setEvaluationPeriods is now unsafe to call directly for DB sync. Use updateEvaluationPeriod.
+        updateEvaluationPeriod, // New exposed function
         isGradingOpenFor,
         calculationPeriod, setCalculationPeriod,
         isGradingOpen,
-        addAcademicYear
+        addAcademicYear,
+        loadingPeriods
     };
 
     return (

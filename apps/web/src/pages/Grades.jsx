@@ -13,7 +13,7 @@ const subjects = [
 
 const Grades = () => {
     const { currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, isGradingOpen } = useAcademicYear();
-    const { classes, students: globalStudents, setStudents: setGlobalStudents } = useSchool();
+    const { classes, students: globalStudents, saveGrade } = useSchool();
 
     // Default to first class if available
     const [selectedClass, setSelectedClass] = useState(classes.length > 0 ? classes[0].name : "");
@@ -65,19 +65,66 @@ const Grades = () => {
         }));
     };
 
-    const handleSave = () => {
-        // Merge local changes back to global state
-        const updatedGlobalStudents = globalStudents.map(globalStudent => {
-            const localMatch = localStudents.find(l => l.id === globalStudent.id);
-            if (localMatch) {
-                return localMatch;
-            }
-            return globalStudent;
-        });
+    // --- SAVE LOGIC ---
+    const [isSaving, setIsSaving] = useState(false);
 
-        setGlobalStudents(updatedGlobalStudents);
-        // Optional: Show a toast or notification here
-        alert("Notes enregistrées avec succès !");
+    const handleSave = async () => {
+        setIsSaving(true);
+        let errorCount = 0;
+
+        // Strategy: We compare localStudents with initial data (or just save all that changed)
+        // For simplicity, we can iterate over all grades of all students in viewing context.
+        // Or better: Track changes?
+        // Current implementation: We have localStudents with updated grades.
+
+        // We will just iterate and upsert non-empty grades OR all grades to be safe?
+        // Saving everything might be heavy. 
+        // Let's iterate over localStudents and send each grade value.
+
+        const promises = [];
+
+        for (const student of localStudents) {
+            // student.grades = { [subject]: { [semester]: { interro1: val ... } } }
+            const subjectGrades = student.grades?.[selectedSubject]?.[selectedViewSemester];
+            if (!subjectGrades) continue;
+
+            // Iterate over keys
+            for (const [type, value] of Object.entries(subjectGrades)) {
+                // Value "" or null? We might want to save null to clear it?
+                // But upsert with value "" might default to 0 or error if numeric.
+                // Database value is DECIMAL.
+                // If value is "", we should probably save NULL.
+
+                let numValue = value === "" ? null : parseFloat(value);
+
+                // If it's valid numeric or null
+                promises.push(saveGrade({
+                    studentId: student.id,
+                    subjectName: selectedSubject,
+                    semester: selectedViewSemester,
+                    type: type,
+                    value: numValue
+                }));
+            }
+        }
+
+        try {
+            const results = await Promise.all(promises);
+            const failures = results.filter(r => !r.success);
+            if (failures.length > 0) {
+                alert(`Erreur lors de la sauvegarde de ${failures.length} notes.`);
+            } else {
+                alert("Notes enregistrées avec succès !");
+            }
+        } catch (err) {
+            console.error(err);
+            alert("Erreur critique lors de la sauvegarde.");
+        } finally {
+            setIsSaving(false);
+            // Refresh global data to ensure sync
+            // triggerSchoolRefresh(); // We don't have this exposed yet, but context might auto-refresh?
+            // Actually saveGrade does NOT refresh to rely on manual refresh or we can add it.
+        }
     };
 
     // Calculate averages (wrapper around utils)
@@ -118,7 +165,7 @@ const Grades = () => {
                             className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-5 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-md"
                         >
                             <Save className="w-4 h-4" />
-                            <span>Enregistrer</span>
+                            <span>{isSaving ? 'Enregistrement...' : 'Enregistrer'}</span>
                         </button>
                     ) : (
                         <div className="flex items-center justify-center space-x-2 bg-gray-100 text-gray-500 px-5 py-2 rounded-xl border border-gray-200 cursor-not-allowed">

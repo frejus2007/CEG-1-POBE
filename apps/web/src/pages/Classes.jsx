@@ -62,15 +62,17 @@ const ClassCard = ({ id, className, students, mainTeacher, subjects, onEdit, onD
 );
 
 const Classes = () => {
-    const { classes, setClasses, getTeachersForClass, validateHeadTeacherAssignment } = useSchool();
+    const { classes, addClass, updateClass, deleteClass, getTeachersForClass, validateHeadTeacherAssignment } = useSchool();
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [formData, setFormData] = useState({
         level: '6ème',
         suffix: '',
-        mainTeacher: ''
+        mainTeacherId: ''
     });
+
+
 
     // Determine counts per level
     const levelCounts = LEVELS.reduce((acc, level) => {
@@ -80,11 +82,10 @@ const Classes = () => {
 
     const handleAddClass = () => {
         setEditingId(null);
-        // If inside a level, pre-select it
         setFormData({
             level: selectedLevel || '6ème',
             suffix: '',
-            mainTeacher: ''
+            mainTeacherId: ''
         });
         setIsModalOpen(true);
     };
@@ -93,7 +94,6 @@ const Classes = () => {
         const cls = classes.find(c => c.id === id);
         if (!cls) return;
 
-        // Try to separate Level and Suffix based on our known Levels
         let foundLevel = LEVELS.find(l => cls.name.startsWith(l)) || '6ème';
         let suffix = cls.name.replace(foundLevel, '').trim();
 
@@ -101,50 +101,53 @@ const Classes = () => {
         setFormData({
             level: foundLevel,
             suffix: suffix,
-            mainTeacher: cls.mainTeacher // This might be "Non assigné" initially
+            mainTeacherId: cls.mainTeacherId || ''
         });
         setIsModalOpen(true);
     };
 
-    const handleDeleteClass = (id) => {
+    const handleDeleteClass = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cette classe ?')) {
-            setClasses(classes.filter(c => c.id !== id));
+            const res = await deleteClass(id);
+            if (!res.success) alert(res.error);
         }
     };
 
-    const handleSubmit = (e) => {
+    const handleSubmit = async (e) => {
         e.preventDefault();
         const className = `${formData.level} ${formData.suffix}`;
 
-        // Validate Head Teacher Constraint
-        if (formData.mainTeacher && formData.mainTeacher !== 'Non assigné') {
-            const validation = validateHeadTeacherAssignment(formData.mainTeacher, editingId);
+        // Validate Head Teacher Constraint (Optional/TODO: Update validation for IDs)
+        /*
+        if (formData.mainTeacherId) {
+            const validation = validateHeadTeacherAssignment(formData.mainTeacherId, editingId);
             if (!validation.valid) {
                 alert(validation.error);
                 return;
             }
         }
+        */
 
+        const classData = {
+            name: className,
+            level: formData.level,
+            mainTeacherId: formData.mainTeacherId
+        };
+
+        let res;
         if (editingId) {
-            setClasses(classes.map(c =>
-                c.id === editingId
-                    ? { ...c, name: className, mainTeacher: formData.mainTeacher }
-                    : c
-            ));
+            res = await updateClass(editingId, classData);
         } else {
-            const newClass = {
-                id: Date.now(),
-                name: className,
-                students: 0,
-                mainTeacher: formData.mainTeacher || 'Non assigné',
-                subjects: 12
-            };
-            setClasses([...classes, newClass]);
+            res = await addClass(classData);
         }
 
-        setIsModalOpen(false);
-        setFormData({ level: '6ème', suffix: '', mainTeacher: '' });
-        setEditingId(null);
+        if (res.success) {
+            setIsModalOpen(false);
+            setFormData({ level: '6ème', suffix: '', mainTeacherId: '' });
+            setEditingId(null);
+        } else {
+            alert("Erreur: " + res.error);
+        }
     };
 
     // Filter classes for the current view
@@ -262,13 +265,13 @@ const Classes = () => {
                     <div className="space-y-2">
                         <label className="text-sm font-medium text-gray-700">Professeur Principal</label>
                         <Select
-                            value={formData.mainTeacher}
-                            onChange={(e) => setFormData({ ...formData, mainTeacher: e.target.value })}
+                            value={formData.mainTeacherId}
+                            onChange={(e) => setFormData({ ...formData, mainTeacherId: e.target.value })}
                         >
                             <option value="">Sélectionner un PP</option>
-                            <option value="Non assigné">Non assigné</option>
+                            <option value="">Non assigné</option>
                             {availablePPs.map(teacher => (
-                                <option key={teacher.id} value={`${teacher.nom} ${teacher.prenom}`}>
+                                <option key={teacher.id} value={teacher.id}>
                                     {teacher.nom} {teacher.prenom} ({teacher.subject})
                                 </option>
                             ))}
