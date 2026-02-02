@@ -1,0 +1,19 @@
+@import url('https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap');
+@import "tailwindcss";
+
+@layer base {
+    body {
+        font-family: 'Outfit', sans-serif;
+        @apply bg-gray-50 text-gray-900 antialiased;
+    }
+}
+
+@layer utilities {
+    .glass {
+        @apply bg-white/80 backdrop-blur-lg border border-white/20 shadow-sm;
+    }
+
+    .glass-card {
+        @apply bg-white rounded-2xl border border-gray-100 shadow-sm transition-all duration-300;
+    }
+}
