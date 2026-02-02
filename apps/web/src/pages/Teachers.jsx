@@ -24,12 +24,22 @@ const Teachers = () => {
         phone: '',
         email: ''
     });
+    const [searchQuery, setSearchQuery] = useState('');
 
     // Filter teachers based on tab
     const approvedTeachers = teachers.filter(t => t.is_approved !== false);
     const pendingTeachers = teachers.filter(t => t.is_approved === false);
 
-    const displayedTeachers = activeTab === 'active' ? approvedTeachers : pendingTeachers;
+    const filtered = (activeTab === 'active' ? approvedTeachers : pendingTeachers).filter(t => {
+        const q = searchQuery.toLowerCase();
+        return !q ||
+            (t.nom && t.nom.toLowerCase().includes(q)) ||
+            (t.prenom && t.prenom.toLowerCase().includes(q)) ||
+            (t.email && t.email.toLowerCase().includes(q)) ||
+            (t.subject && t.subject.toLowerCase().includes(q));
+    });
+
+    const displayedTeachers = filtered;
 
 
 
@@ -133,6 +143,8 @@ const Teachers = () => {
                         <input
                             type="text"
                             placeholder="Rechercher un professeur..."
+                            value={searchQuery}
+                            onChange={(e) => setSearchQuery(e.target.value)}
                             className="w-full pl-10 pr-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all"
                         />
                     </div>

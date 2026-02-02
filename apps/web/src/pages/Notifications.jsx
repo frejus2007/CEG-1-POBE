@@ -1,12 +1,13 @@
 import React, { useState, useEffect } from 'react';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
-import { Bell, CheckCircle, AlertCircle, Users, Send } from 'lucide-react';
+import { Bell, CheckCircle, AlertCircle, Users, Send, Search } from 'lucide-react';
 import { useSchool } from '../context/SchoolContext';
 
 const Notifications = () => {
     const { teachers, notifications, sendNotification, systemStats } = useSchool();
-    const [recipients, setRecipients] = useState('all');
+    const [recipients, setRecipients] = useState('all'); // 'all' | 'missing' | 'custom'
+    const [teacherSearch, setTeacherSearch] = useState('');
     const [selectedTeacherIds, setSelectedTeacherIds] = useState([]);
     const [reminderType, setReminderType] = useState('missing_grades');
     const [message, setMessage] = useState('');
@@ -135,18 +136,45 @@ const Notifications = () => {
                                 </label>
 
                                 {recipients === 'custom' && (
-                                    <div className="ml-8 mt-2 max-h-48 overflow-y-auto space-y-2 border-l-2 border-blue-100 pl-4 pr-2 custom-scrollbar">
-                                        {activeTeachers.map(t => (
-                                            <label key={t.id} className="flex items-center space-x-2 text-sm p-1.5 hover:bg-gray-50 rounded cursor-pointer">
-                                                <input
-                                                    type="checkbox"
-                                                    checked={selectedTeacherIds.includes(t.id)}
-                                                    onChange={() => toggleTeacher(t.id)}
-                                                    className="rounded text-blue-600 focus:ring-blue-500"
-                                                />
-                                                <span className="text-gray-600">{t.full_name} <span className="text-xs text-gray-400">({t.subject})</span></span>
-                                            </label>
-                                        ))}
+                                    <div className="ml-8 mt-2 max-h-60 flex flex-col border-l-2 border-blue-100 pl-4 space-y-3">
+                                        <div className="relative">
+                                            <Search className="w-4 h-4 text-gray-400 absolute left-3 top-1/2 transform -translate-y-1/2" />
+                                            <input
+                                                type="text"
+                                                placeholder="Rechercher un prof..."
+                                                value={teacherSearch}
+                                                onChange={(e) => setTeacherSearch(e.target.value)}
+                                                className="w-full pl-9 pr-3 py-1.5 bg-gray-50 border border-gray-200 rounded-lg text-sm focus:ring-2 focus:ring-blue-500 outline-none"
+                                            />
+                                        </div>
+                                        <div className="overflow-y-auto space-y-1 custom-scrollbar pr-2">
+                                            {activeTeachers
+                                                .filter(t =>
+                                                    !teacherSearch ||
+                                                    (t.name || "").toLowerCase().includes(teacherSearch.toLowerCase()) ||
+                                                    (t.subject || "").toLowerCase().includes(teacherSearch.toLowerCase())
+                                                )
+                                                .map(t => (
+                                                    <label key={t.id} className="flex items-center space-x-2 text-sm p-1.5 hover:bg-gray-50 rounded cursor-pointer">
+                                                        <input
+                                                            type="checkbox"
+                                                            checked={selectedTeacherIds.includes(t.id)}
+                                                            onChange={() => toggleTeacher(t.id)}
+                                                            className="rounded text-blue-600 focus:ring-blue-500"
+                                                        />
+                                                        <span className="text-gray-600">
+                                                            {t.name} <span className="text-xs text-gray-400">({t.subject})</span>
+                                                        </span>
+                                                    </label>
+                                                ))}
+                                            {activeTeachers.filter(t =>
+                                                !teacherSearch ||
+                                                (t.name || "").toLowerCase().includes(teacherSearch.toLowerCase()) ||
+                                                (t.subject || "").toLowerCase().includes(teacherSearch.toLowerCase())
+                                            ).length === 0 && (
+                                                    <p className="text-xs text-center py-4 text-gray-400 italic">Aucun professeur trouvé</p>
+                                                )}
+                                        </div>
                                     </div>
                                 )}
                             </div>

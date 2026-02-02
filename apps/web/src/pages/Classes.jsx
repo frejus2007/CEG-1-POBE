@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Users, BookOpen, Plus, Edit2, Trash2, ChevronLeft, Folder } from 'lucide-react';
+import { Users, BookOpen, Plus, Edit2, Trash2, ChevronLeft, Folder, Search } from 'lucide-react';
 import Modal from '../components/ui/Modal';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
