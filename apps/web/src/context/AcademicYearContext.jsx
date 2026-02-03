@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
+import { useToast } from './ToastContext';
 
 const AcademicYearContext = createContext();
 
@@ -35,10 +36,10 @@ export const AcademicYearProvider = ({ children }) => {
     });
     const [loadingPeriods, setLoadingPeriods] = useState(true);
 
-    const [calculationPeriod, setCalculationPeriod] = useState(() => {
-        const stored = localStorage.getItem('calculationPeriod');
-        return stored ? JSON.parse(stored) : { start: '', end: '' };
-    });
+    const [calculationPeriod, setCalculationPeriod] = useState({ start: '', end: '' });
+
+    // Toast notifications
+    const { showSuccess, showError } = useToast();
 
     // Derived state
     const isArchiveView = academicYear !== selectedYear;
@@ -58,13 +59,20 @@ export const AcademicYearProvider = ({ children }) => {
 
                 // Map DB rows to state keys
                 data.forEach(row => {
-                    const key = `${row.type.toLowerCase()}${row.index}`; // e.g., interrogation1
-                    if (newPeriods[key] !== undefined) {
-                        newPeriods[key] = {
+                    if (row.type === 'CALCULATION') {
+                        setCalculationPeriod({
                             start: row.start_date || '',
-                            end: row.end_date || '',
-                            is_unlocked: row.is_unlocked
-                        };
+                            end: row.end_date || ''
+                        });
+                    } else {
+                        const key = `${row.type.toLowerCase()}${row.index}`; // e.g., interrogation1
+                        if (newPeriods[key] !== undefined) {
+                            newPeriods[key] = {
+                                start: row.start_date || '',
+                                end: row.end_date || '',
+                                is_unlocked: row.is_unlocked
+                            };
+                        }
                     }
                 });
                 setEvaluationPeriods(newPeriods);
@@ -132,12 +140,15 @@ export const AcademicYearProvider = ({ children }) => {
 
             const { data: existing } = await supabase.from('censor_unlocks').select('id').eq('type', type).eq('index', index).single();
 
+            // Get current state values to ensure we don't overwrite with nulls
+            const current = evaluationPeriods[key] || {};
+
             const payload = {
                 type,
                 index,
-                is_unlocked: updates.is_unlocked !== undefined ? updates.is_unlocked : false,
-                start_date: updates.start || null,
-                end_date: updates.end || null,
+                is_unlocked: updates.is_unlocked !== undefined ? updates.is_unlocked : (current.is_unlocked || false),
+                start_date: updates.start !== undefined ? (updates.start || null) : (current.start || null),
+                end_date: updates.end !== undefined ? (updates.end || null) : (current.end || null),
                 updated_at: new Date()
             };
 
@@ -146,8 +157,51 @@ export const AcademicYearProvider = ({ children }) => {
             } else {
                 await supabase.from('censor_unlocks').insert(payload);
             }
+            showSuccess("Période mise à jour avec succès");
         } catch (err) {
             console.error("Error updating period in DB:", err);
+            showError("Erreur lors de la mise à jour de la période");
+        }
+    };
+
+    const updateCalculationPeriod = async (updates) => {
+        // updates: { start, end }
+        setCalculationPeriod(prev => ({ ...prev, ...updates }));
+
+        try {
+            const { data: existing } = await supabase
+                .from('censor_unlocks')
+                .select('id')
+                .eq('type', 'CALCULATION')
+                .eq('index', 1)
+                .single();
+
+            const payload = {
+                type: 'CALCULATION',
+                index: 1,
+                start_date: updates.start !== undefined ? updates.start : calculationPeriod.start, // Handle partial updates carefully
+                end_date: updates.end !== undefined ? updates.end : calculationPeriod.end,
+                updated_at: new Date()
+            };
+
+            // Fix: ensure we use the merged state for payload or pass full object
+            // Better: use the 'updates' merged with current state
+            const newStart = updates.start !== undefined ? updates.start : calculationPeriod.start;
+            const newEnd = updates.end !== undefined ? updates.end : calculationPeriod.end;
+
+            payload.start_date = newStart || null;
+            payload.end_date = newEnd || null;
+
+
+            if (existing) {
+                await supabase.from('censor_unlocks').update(payload).eq('id', existing.id);
+            } else {
+                await supabase.from('censor_unlocks').insert(payload);
+            }
+            showSuccess("Période de calcul mise à jour");
+        } catch (err) {
+            console.error("Error updating calculation period:", err);
+            showError("Erreur lors de la mise à jour de la période de calcul");
         }
     };
 
@@ -203,9 +257,9 @@ export const AcademicYearProvider = ({ children }) => {
         localStorage.setItem('isYearLocked', isYearLocked);
         localStorage.setItem('availableYears', JSON.stringify(availableYears));
         localStorage.setItem('selectedYear', selectedYear);
-        localStorage.setItem('calculationPeriod', JSON.stringify(calculationPeriod));
+        // localStorage.setItem('calculationPeriod', JSON.stringify(calculationPeriod)); // Removed persistence
         // Removed evaluationPeriods from local storage persistence
-    }, [academicYear, currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, availableYears, selectedYear, calculationPeriod]);
+    }, [academicYear, currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, availableYears, selectedYear]);
 
 
     // Actions
@@ -225,6 +279,7 @@ export const AcademicYearProvider = ({ children }) => {
         }
 
         setIsSemester1Locked(true);
+        showSuccess("Semestre 1 verrouillé avec succès");
     };
 
     const startSemester2 = () => {
@@ -243,6 +298,7 @@ export const AcademicYearProvider = ({ children }) => {
         }
 
         setIsSemester2Locked(true);
+        showSuccess("Semestre 2 verrouillé avec succès");
     };
 
     const lockYear = () => {
@@ -253,6 +309,7 @@ export const AcademicYearProvider = ({ children }) => {
                 return;
             }
             setIsYearLocked(true);
+            showSuccess("Année académique verrouillée avec succès");
         }
     };
 
@@ -309,7 +366,8 @@ export const AcademicYearProvider = ({ children }) => {
         evaluationPeriods, setEvaluationPeriods, // NOTE: setEvaluationPeriods is now unsafe to call directly for DB sync. Use updateEvaluationPeriod.
         updateEvaluationPeriod, // New exposed function
         isGradingOpenFor,
-        calculationPeriod, setCalculationPeriod,
+        calculationPeriod, setCalculationPeriod, // Keep set for local, but prefer update
+        updateCalculationPeriod,
         isGradingOpen,
         addAcademicYear,
         loadingPeriods

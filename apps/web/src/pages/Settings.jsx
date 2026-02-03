@@ -1,7 +1,11 @@
-import React, { useState } from 'react';
+import React, { useState, useEffect } from 'react';
 import { Save, School, Calendar, Shield, Lock, Unlock, AlertTriangle, Clock } from 'lucide-react';
 import { useAcademicYear } from '../context/AcademicYearContext';
+import { useSchool } from '../context/SchoolContext';
+import { useToast } from '../context/ToastContext';
+import { Smartphone } from 'lucide-react';
 import Modal from '../components/ui/Modal';
+import { supabase } from '../lib/supabase';
 
 const SecurityModal = ({ isOpen, onClose, onConfirm, actionName }) => {
     const [answer, setAnswer] = useState('');
@@ -86,14 +90,25 @@ const Settings = () => {
         evaluationPeriods, setEvaluationPeriods,
         updateEvaluationPeriod, // Added
         calculationPeriod, setCalculationPeriod,
+        updateCalculationPeriod, // Added
         isGradingOpen,
         addAcademicYear
     } = useAcademicYear();
+    const { appConfig, updateAppConfig } = useSchool();
+    const { showSuccess, showError } = useToast();
 
     const [isSecurityModalOpen, setIsSecurityModalOpen] = useState(false);
     const [pendingAction, setPendingAction] = useState(null);
     const [isNewYearModalOpen, setIsNewYearModalOpen] = useState(false);
     const [newYearInput, setNewYearInput] = useState('');
+
+    // School Info State
+    const [schoolInfo, setSchoolInfo] = useState({
+        name: 'CEG1 POBÈ',
+        address: 'BP 123, Pobè, Plateau',
+        phone: '+229 20 22 00 00',
+        email: 'contact@ceg1pobe.bj'
+    });
 
     const handleActionClick = (action, name) => {
         setPendingAction({ fn: action, name });
@@ -112,6 +127,54 @@ const Settings = () => {
             addAcademicYear(newYearInput);
             setIsNewYearModalOpen(false);
             setNewYearInput('');
+        }
+    };
+
+    // Fetch school info on mount
+    useEffect(() => {
+        const fetchSchoolInfo = async () => {
+            try {
+                const { data, error } = await supabase
+                    .from('school_info')
+                    .select('*')
+                    .single();
+
+                if (error) throw error;
+                if (data) {
+                    setSchoolInfo({
+                        name: data.name || 'CEG1 POBÈ',
+                        address: data.address || '',
+                        phone: data.phone || '',
+                        email: data.email || ''
+                    });
+                }
+            } catch (err) {
+                console.error('Error fetching school info:', err);
+            }
+        };
+        fetchSchoolInfo();
+    }, []);
+
+    const handleSaveSchoolInfo = async () => {
+        try {
+            // Update the single row in school_info table (id = 1)
+            const { error } = await supabase
+                .from('school_info')
+                .update({
+                    name: schoolInfo.name,
+                    address: schoolInfo.address,
+                    phone: schoolInfo.phone,
+                    email: schoolInfo.email,
+                    updated_at: new Date()
+                })
+                .eq('id', 1);
+
+            if (error) throw error;
+
+            showSuccess('Informations de l\'établissement enregistrées');
+        } catch (err) {
+            console.error('Error saving school info:', err);
+            showError('Erreur lors de l\'enregistrement');
         }
     };
 
@@ -136,7 +199,8 @@ const Settings = () => {
                             <label className="text-sm font-medium text-gray-700">Nom de l'établissement</label>
                             <input
                                 type="text"
-                                defaultValue="CEG1 POBÈ"
+                                value={schoolInfo.name}
+                                onChange={(e) => setSchoolInfo({ ...schoolInfo, name: e.target.value })}
                                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                             />
                         </div>
@@ -144,7 +208,8 @@ const Settings = () => {
                             <label className="text-sm font-medium text-gray-700">Adresse</label>
                             <input
                                 type="text"
-                                defaultValue="BP 123, Pobè, Plateau"
+                                value={schoolInfo.address}
+                                onChange={(e) => setSchoolInfo({ ...schoolInfo, address: e.target.value })}
                                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                             />
                         </div>
@@ -152,7 +217,8 @@ const Settings = () => {
                             <label className="text-sm font-medium text-gray-700">Téléphone Admin</label>
                             <input
                                 type="text"
-                                defaultValue="+229 20 22 00 00"
+                                value={schoolInfo.phone}
+                                onChange={(e) => setSchoolInfo({ ...schoolInfo, phone: e.target.value })}
                                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                             />
                         </div>
@@ -160,7 +226,8 @@ const Settings = () => {
                             <label className="text-sm font-medium text-gray-700">Email Contact</label>
                             <input
                                 type="email"
-                                defaultValue="contact@ceg1pobe.bj"
+                                value={schoolInfo.email}
+                                onChange={(e) => setSchoolInfo({ ...schoolInfo, email: e.target.value })}
                                 className="w-full px-4 py-2 bg-gray-50 border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none"
                             />
                         </div>
@@ -275,7 +342,7 @@ const Settings = () => {
                                 <input
                                     type="date"
                                     value={calculationPeriod.start}
-                                    onChange={(e) => setCalculationPeriod({ ...calculationPeriod, start: e.target.value })}
+                                    onChange={(e) => updateCalculationPeriod({ start: e.target.value })}
                                     className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                 />
                             </div>
@@ -284,7 +351,7 @@ const Settings = () => {
                                 <input
                                     type="date"
                                     value={calculationPeriod.end}
-                                    onChange={(e) => setCalculationPeriod({ ...calculationPeriod, end: e.target.value })}
+                                    onChange={(e) => updateCalculationPeriod({ end: e.target.value })}
                                     className="w-full px-3 py-2 bg-white border border-gray-200 rounded-lg focus:ring-2 focus:ring-blue-500 outline-none text-sm"
                                 />
                             </div>
@@ -371,8 +438,46 @@ const Settings = () => {
                     </div>
                 </div>
 
+                <div className="p-6 border-b border-gray-100">
+                    <div className="flex items-center space-x-3 mb-4">
+                        <div className="p-2 bg-indigo-50 rounded-lg text-indigo-600">
+                            <Smartphone className="w-5 h-5" />
+                        </div>
+                        <h2 className="text-lg font-bold text-gray-900">Application Mobile</h2>
+                    </div>
+
+                    <div className="bg-white rounded-xl border border-gray-200 p-4">
+                        <div className="flex items-center justify-between">
+                            <div>
+                                <h3 className="font-semibold text-gray-900">Session de Calcul MG</h3>
+                                <p className="text-sm text-gray-500 mt-1">
+                                    Détermine si 'Session de calcul MG' est accessible (déverrouillée) ou masquée (cadenas) sur l'application mobile.
+                                </p>
+                            </div>
+                            <div className="flex items-center gap-3">
+                                <span className={`text-sm font-medium ${appConfig?.enable_mg_session ? 'text-green-600' : 'text-gray-500'}`}>
+                                    {appConfig?.enable_mg_session ? 'Déverrouillé' : 'Verrouillé'}
+                                </span>
+                                <button
+                                    onClick={() => updateAppConfig({ enable_mg_session: !appConfig?.enable_mg_session })}
+                                    className={`relative inline-flex h-6 w-11 items-center rounded-full transition-colors focus:outline-none focus:ring-2 focus:ring-indigo-500 focus:ring-offset-2 ${appConfig?.enable_mg_session ? 'bg-green-500' : 'bg-gray-200'
+                                        }`}
+                                >
+                                    <span
+                                        className={`${appConfig?.enable_mg_session ? 'translate-x-6' : 'translate-x-1'
+                                            } inline-block h-4 w-4 transform rounded-full bg-white transition-transform`}
+                                    />
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
                 <div className="p-6 bg-gray-50 flex justify-end">
-                    <button className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm font-medium">
+                    <button
+                        onClick={handleSaveSchoolInfo}
+                        className="flex items-center space-x-2 bg-blue-600 text-white px-6 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm font-medium"
+                    >
                         <Save className="w-4 h-4" />
                         <span>Enregistrer les modifications</span>
                     </button>
@@ -422,7 +527,7 @@ const Settings = () => {
                     </div>
                 </form>
             </Modal>
-        </div >
+        </div>
     );
 };
 

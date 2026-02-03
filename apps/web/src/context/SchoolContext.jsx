@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect } from 'react';
 import { supabase } from '../lib/supabase';
 import { getCycleByLevel, getCoefficient } from '../utils/coefficients';
+import { useToast } from './ToastContext';
 
 const SchoolContext = createContext();
 
@@ -37,6 +38,9 @@ export const SchoolProvider = ({ children }) => {
         progress: 0
     });
 
+    // Toast notifications
+    const { showSuccess, showError, showInfo } = useToast();
+
     // Auth Methods
     const login = async (email, password) => {
         const { data, error } = await supabase.auth.signInWithPassword({
@@ -61,9 +65,11 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('notifications').insert(payloads);
             if (error) throw error;
             await refreshData();
+            showSuccess("Notification envoyée avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error sending notification:", err);
+            showError("Erreur lors de l'envoi de la notification");
             return { success: false, error: err.message };
         }
     };
@@ -458,9 +464,11 @@ export const SchoolProvider = ({ children }) => {
             console.log("Class added successfully:", data);
 
             await refreshData();
+            showSuccess("Classe ajoutée avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error adding class:", err);
+            showError("Erreur lors de l'ajout de la classe");
             return { success: false, error: err.message };
         }
     };
@@ -530,9 +538,11 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('classes').delete().eq('id', id);
             if (error) throw error;
             await refreshData();
+            showSuccess("Classe supprimée avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error deleting class:", err);
+            showError("Erreur lors de la suppression de la classe");
             return { success: false, error: err.message };
         }
     };
@@ -564,9 +574,11 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('students').insert(payload);
             if (error) throw error;
             await refreshData();
+            showSuccess("Élève ajouté avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error adding student:", err);
+            showError("Erreur lors de l'ajout de l'élève");
             return { success: false, error: err.message };
         }
     };
@@ -602,9 +614,11 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('students').delete().eq('id', id);
             if (error) throw error;
             await refreshData();
+            showSuccess("Élève supprimé avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error deleting student:", err);
+            showError("Erreur lors de la suppression de l'élève");
             return { success: false, error: err.message };
         }
     };
@@ -644,7 +658,30 @@ export const SchoolProvider = ({ children }) => {
             return { success: true };
         } catch (err) {
             console.error("Error saving grade:", err);
+            showError("Erreur lors de l'enregistrement de la note");
             return { success: false, error: err.message };
+        }
+    };
+
+    const updateAppConfig = async (newConfig) => {
+        try {
+            let query = supabase.from('app_config');
+
+            if (appConfig?.id) {
+                query = query.update(newConfig).eq('id', appConfig.id);
+            } else {
+                if (!appConfig?.id) throw new Error('Config ID manquante');
+            }
+
+            const { data, error } = await query.select().single();
+
+            if (error) throw error;
+
+            setAppConfig(data);
+            return { success: true, data };
+        } catch (error) {
+            console.error('Error updating app config:', error);
+            return { success: false, error: error.message };
         }
     };
 
@@ -682,6 +719,7 @@ export const SchoolProvider = ({ children }) => {
             return { success: true };
         } catch (err) {
             console.error("Error adding assignment:", err);
+            showError("Erreur lors de l'ajout de l'assignation");
             return { success: false, error: err.message };
         }
     };
@@ -725,9 +763,11 @@ export const SchoolProvider = ({ children }) => {
             const { error } = await supabase.from('teacher_assignments').delete().eq('id', id);
             if (error) throw error;
             await refreshData();
+            showSuccess("Assignation supprimée avec succès");
             return { success: true };
         } catch (err) {
             console.error("Error deleting assignment:", err);
+            showError("Erreur lors de la suppression de l'assignation");
             return { success: false, error: err.message };
         }
     };
@@ -754,6 +794,7 @@ export const SchoolProvider = ({ children }) => {
         sendNotification,
         validateHeadTeacherAssignment,
         appConfig,
+        updateAppConfig,
         systemStats,
         loading,
         error,

@@ -16,4 +16,21 @@
     .glass-card {
         @apply bg-white rounded-2xl border border-gray-100 shadow-sm transition-all duration-300;
     }
+
+    /* Toast Animations */
+    .toast {
+        opacity: 0;
+        transform: translateX(100%);
+        transition: all 0.3s ease-in-out;
+    }
+
+    .toast-enter {
+        opacity: 1;
+        transform: translateX(0);
+    }
+
+    .toast-exit {
+        opacity: 0;
+        transform: translateX(100%);
+    }
 }
