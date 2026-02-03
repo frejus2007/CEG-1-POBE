@@ -111,14 +111,12 @@ const Dashboard = () => {
                     value={teachers.length}
                     icon={Users}
                     color="blue"
-                    trend="+2 cette semaine"
                 />
                 <StatCard
                     title="Total Élèves"
                     value={students.length}
                     icon={GraduationCap}
                     color="purple"
-                    trend="+15 inscriptions"
                 />
                 <StatCard
                     title="Classes Actives"

@@ -215,8 +215,12 @@ export const SchoolProvider = ({ children }) => {
                 q.eq('is_active', true)
             );
 
-            // Filter students locally to ensure they belong to the current year's classes
-            const currentYearStudents = studentsData.filter(s => s.class?.academic_year_id === yearData.id);
+            // Filter students locally: 
+            // 1. Students explicitly assigned to a class in the current year
+            // 2. Students not assigned to any class but still active (as fallback for Dashboard total)
+            const currentYearStudents = studentsData.filter(s =>
+                !s.class || s.class.academic_year_id === yearData.id
+            );
 
             // 6. Subjects
             const { data: subjectsData, error: subjectsError } = await supabase
@@ -352,6 +356,7 @@ export const SchoolProvider = ({ children }) => {
                     prenom: s.first_name,
                     full_name: `${s.last_name} ${s.first_name}`,
                     current_class_id: s.current_class_id,
+                    classId: s.current_class_id,
                     class: s.class?.name || 'Non assigné',
                     dob: s.date_of_birth || '',
                     avg: 0,

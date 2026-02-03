@@ -84,7 +84,7 @@ const Students = () => {
     }, {});
 
     const classCounts = classes.reduce((acc, cls) => {
-        acc[cls.name] = students.filter(s => s.class === cls.name).length;
+        acc[cls.name] = students.filter(s => s.classId === cls.id).length;
         return acc;
     }, {});
 
