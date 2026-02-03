@@ -23,6 +23,13 @@ const Grades = () => {
     // Local state for the table (filtered students)
     const [localStudents, setLocalStudents] = useState([]);
 
+    // Ensure we have a default class when data loads
+    useEffect(() => {
+        if (!selectedClass && classes.length > 0) {
+            setSelectedClass(classes[0].name);
+        }
+    }, [classes, selectedClass]);
+
     // Sync local state when filters or global data change
     useEffect(() => {
         if (!selectedClass) return;

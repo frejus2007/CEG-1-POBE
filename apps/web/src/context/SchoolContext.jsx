@@ -139,6 +139,39 @@ export const SchoolProvider = ({ children }) => {
         try {
             console.log("Fetching Supabase data...");
 
+            // Parallel Fetcher (High-Performance for large datasets)
+            const parallelFetch = async (table, selectQuery, queryBuilder = (q) => q) => {
+                const PAGE_SIZE = 1000;
+
+                // 1. Get total count first
+                let countQuery = supabase.from(table).select('*', { count: 'exact', head: true });
+                countQuery = queryBuilder(countQuery);
+                const { count, error: countError } = await countQuery;
+
+                if (countError) throw countError;
+                if (!count) return [];
+
+                // 2. Prepare parallel page requests
+                const totalPages = Math.ceil(count / PAGE_SIZE);
+                const pageIndices = Array.from({ length: totalPages }, (_, i) => i);
+
+                console.log(`Parallel fetch starting for ${table}: ${count} records, ${totalPages} pages.`);
+
+                const results = await Promise.all(pageIndices.map(async (pageIndex) => {
+                    const from = pageIndex * PAGE_SIZE;
+                    const to = from + PAGE_SIZE - 1;
+
+                    let query = supabase.from(table).select(selectQuery).range(from, to);
+                    query = queryBuilder(query);
+                    const { data, error } = await query;
+
+                    if (error) throw error;
+                    return data;
+                }));
+
+                return results.flat();
+            };
+
             // 1. Academic Years
             const { data: yearData, error: yearError } = await supabase
                 .from('academic_years')
@@ -148,18 +181,21 @@ export const SchoolProvider = ({ children }) => {
             if (yearError) throw yearError;
             setActiveYear(yearData);
 
-            // 2. Classes
-            const { data: classesData, error: classError } = await supabase
-                .from('classes')
-                .select(`*, main_teacher:profiles!main_teacher_id (full_name)`);
-            if (classError) throw classError;
+            if (!yearData) {
+                console.warn("Aucune année académique active trouvée.");
+                setLoading(false);
+                return;
+            }
+
+            // 2. Classes (Filtered by year)
+            const classesData = await parallelFetch('classes', `*, main_teacher:profiles!main_teacher_id (full_name)`, (q) =>
+                q.eq('academic_year_id', yearData.id)
+            );
 
             // 3. Teachers (Active)
-            const { data: teachersData, error: teacherError } = await supabase
-                .from('profiles')
-                .select(`*, subject:subjects!specialty_subject_id (name)`)
-                .in('role', ['TEACHER', 'PRINCIPAL_TEACHER', 'CENSEUR']);
-            if (teacherError) throw teacherError;
+            const teachersData = await parallelFetch('profiles', `*, subject:subjects!specialty_subject_id (name)`, (q) =>
+                q.in('role', ['TEACHER', 'PRINCIPAL_TEACHER', 'CENSEUR'])
+            );
 
             // 3b. Pending Teachers (from View)
             const { data: pendingData, error: pendingError } = await supabase
@@ -169,22 +205,18 @@ export const SchoolProvider = ({ children }) => {
             if (pendingError) {
                 console.error("Erreur lors du chargement des demandes (View):", pendingError);
             }
-
-            // Note: If view doesn't exist or error, we just ignore pending for now to avoid crash
             const safePending = pendingData || [];
 
             // 4. Assignments
-            const { data: assignmentsData, error: assignError } = await supabase
-                .from('teacher_assignments')
-                .select(`*, class:classes (name), teacher:profiles (full_name), subject:subjects (name)`);
-            if (assignError) throw assignError;
+            const assignmentsData = await parallelFetch('teacher_assignments', `*, class:classes (name), teacher:profiles (full_name), subject:subjects (name)`);
 
-            // 5. Students
-            const { data: studentsData, error: studentError } = await supabase
-                .from('students')
-                .select(`*, class:classes (name)`)
-                .eq('is_active', true);
-            if (studentError) throw studentError;
+            // 5. Students (Filtered by year)
+            const studentsData = await parallelFetch('students', `*, class:classes (name, academic_year_id)`, (q) =>
+                q.eq('is_active', true)
+            );
+
+            // Filter students locally to ensure they belong to the current year's classes
+            const currentYearStudents = studentsData.filter(s => s.class?.academic_year_id === yearData.id);
 
             // 6. Subjects
             const { data: subjectsData, error: subjectsError } = await supabase
@@ -194,24 +226,14 @@ export const SchoolProvider = ({ children }) => {
             if (subjectsError) throw subjectsError;
 
             // 7. Grades
-            let gradesData = [];
-            try {
-                const { data, error } = await supabase.from('grades').select('*');
-                if (error) {
-                    console.warn("Grades fetch error (table might be missing):", error.message);
-                } else {
-                    gradesData = data;
-                }
-            } catch (gErr) {
-                console.warn("Grades fetch exception:", gErr);
-            }
+            const gradesData = await parallelFetch('grades', '*');
 
             // 8. Notifications / Recent Activities
             const { data: notifData, error: notifError } = await supabase
                 .from('notifications')
                 .select('*')
                 .order('created_at', { ascending: false })
-                .limit(10);
+                .limit(20);
             if (notifError) {
                 console.warn("Notifications fetch error:", notifError.message);
             }
@@ -228,7 +250,7 @@ export const SchoolProvider = ({ children }) => {
             // --- TRANSFORM DATA ---
 
             const formattedClasses = classesData.map(c => {
-                const studentCount = studentsData.filter(s => s.current_class_id === c.id).length;
+                const studentCount = currentYearStudents.filter(s => s.current_class_id === c.id).length;
                 return {
                     id: c.id,
                     name: c.name,
@@ -309,7 +331,7 @@ export const SchoolProvider = ({ children }) => {
 
             // I will target the student mapping block specifically.
 
-            const formattedStudents = studentsData.map(s => {
+            const formattedStudents = currentYearStudents.map(s => {
                 // Map grades to nested structure: grades[subjectName][semester][type] = value
                 const studentGrades = {};
 
@@ -343,14 +365,14 @@ export const SchoolProvider = ({ children }) => {
             setStudents(formattedStudents);
 
             // --- CALCULATE SYSTEM STATS ---
-            const totalStudents = studentsData.length;
+            const totalStudents = currentYearStudents.length;
             const totalAssignments = assignmentsData.length;
-            const expectedGrades = totalStudents * totalAssignments; // Simplified: usually it's sum(students in class X * assignments for class X)
+            const expectedGrades = totalStudents * totalAssignments; // Simplified
 
             // Refined calculation
             let totalExpected = 0;
             classesData.forEach(cls => {
-                const classStudents = studentsData.filter(s => s.current_class_id === cls.id).length;
+                const classStudents = currentYearStudents.filter(s => s.current_class_id === cls.id).length;
                 const classAssignments = assignmentsData.filter(a => a.class_id === cls.id).length;
                 totalExpected += (classStudents * classAssignments);
             });
