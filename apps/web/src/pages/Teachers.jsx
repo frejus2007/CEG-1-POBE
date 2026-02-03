@@ -1,5 +1,5 @@
 import React, { useState } from 'react';
-import { Search, Plus, Phone, Mail, BookOpen, MoreVertical, Edit2, Trash2, User, Check, X } from 'lucide-react';
+import { Search, Plus, Phone, Mail, BookOpen, MoreVertical, Edit2, Trash2, User, Check, CheckCircle, X } from 'lucide-react';
 import Modal from '../components/ui/Modal';
 import Card from '../components/ui/Card';
 import Button from '../components/ui/Button';
@@ -10,7 +10,7 @@ import { useSchool } from '../context/SchoolContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
 
 const Teachers = () => {
-    const { teachers, setTeachers, subjects, createTeacher, approveTeacher, rejectTeacher, refreshData } = useSchool();
+    const { teachers, setTeachers, subjects, createTeacher, approveTeacher, approveAllTeachers, rejectTeacher, refreshData } = useSchool();
     const { isYearLocked } = useAcademicYear();
 
     const [activeTab, setActiveTab] = useState('active'); // 'active' | 'pending'
@@ -81,6 +81,14 @@ const Teachers = () => {
         }
     };
 
+    const handleApproveAll = async () => {
+        if (window.confirm(`Confirmer l'approbation de ${pendingTeachers.length} demande(s) de professeur(s) ?`)) {
+            const ids = pendingTeachers.map(t => t.id);
+            const res = await approveAllTeachers(ids);
+            if (!res.success) alert("Erreur: " + res.error);
+        }
+    };
+
     const handleSubmit = async (e) => {
         e.preventDefault();
         setLoading(true);
@@ -102,11 +110,21 @@ const Teachers = () => {
 
     return (
         <div className="space-y-6">
-            <div>
-                <h1 className="text-2xl font-bold text-gray-900">Professeurs</h1>
-                <p className="text-gray-500 mt-1">Gérez la liste des enseignants et leurs attributions</p>
+            <div className="flex flex-col md:flex-row md:items-center justify-between gap-4">
+                <div>
+                    <h1 className="text-2xl font-bold text-gray-900">Professeurs</h1>
+                    <p className="text-gray-500 mt-1">Gérez la liste des enseignants et leurs attributions</p>
+                </div>
+                {pendingTeachers.length > 0 && !isYearLocked && (
+                    <button
+                        onClick={handleApproveAll}
+                        className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition-colors shadow-sm"
+                    >
+                        <CheckCircle className="w-5 h-5" />
+                        <span>Tout approuver ({pendingTeachers.length})</span>
+                    </button>
+                )}
             </div>
-
 
             {/* TABS */}
             <div className="flex space-x-4 border-b border-gray-200">

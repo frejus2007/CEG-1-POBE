@@ -440,6 +440,27 @@ export const SchoolProvider = ({ children }) => {
         }
     };
 
+    const approveAllTeachers = async (teacherIds) => {
+        try {
+            if (!teacherIds || teacherIds.length === 0) return { success: true };
+
+            const { error } = await supabase
+                .from('profiles')
+                .update({ is_approved: true })
+                .in('id', teacherIds);
+
+            if (error) throw error;
+
+            await refreshData();
+            showSuccess(`${teacherIds.length} professeur(s) approuvé(s) avec succès`);
+            return { success: true };
+        } catch (err) {
+            console.error("Error approving all teachers:", err);
+            showError("Erreur lors de l'approbation multiple");
+            return { success: false, error: err.message };
+        }
+    };
+
     // --- CLASS MANAGEMENT ---
     const addClass = async (classData) => {
         try {
@@ -780,6 +801,7 @@ export const SchoolProvider = ({ children }) => {
         subjects,
         getTeachersForClass,
         approveTeacher,
+        approveAllTeachers,
         rejectTeacher,
         addClass,
         updateClass,
