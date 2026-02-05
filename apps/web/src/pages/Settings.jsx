@@ -1,9 +1,8 @@
 import React, { useState, useEffect } from 'react';
-import { Save, School, Calendar, Shield, Lock, Unlock, AlertTriangle, Clock } from 'lucide-react';
+import { Save, School, Calendar, Shield, Lock, Unlock, AlertTriangle, Clock, RefreshCw, Smartphone } from 'lucide-react';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useSchool } from '../context/SchoolContext';
 import { useToast } from '../context/ToastContext';
-import { Smartphone } from 'lucide-react';
 import Modal from '../components/ui/Modal';
 import { supabase } from '../lib/supabase';
 
@@ -30,7 +29,7 @@ const SecurityModal = ({ isOpen, onClose, onConfirm, actionName }) => {
                 <div className="bg-red-50 p-4 rounded-lg flex items-start space-x-3 text-red-800">
                     <AlertTriangle className="w-5 h-5 flex-shrink-0 mt-0.5" />
                     <p className="text-sm">
-                        Attention : L'action <strong>"{actionName}"</strong> est irréversible.
+                        Attention : L'action <strong>"{actionName}"</strong> est sensible.
                         Veuillez répondre à la question de sécurité pour confirmer.
                     </p>
                 </div>
@@ -80,20 +79,20 @@ const Settings = () => {
     const {
         academicYear,
         currentSemester,
-        isSemester1Locked,
-        isSemester2Locked,
         isYearLocked,
-        lockSemester1,
-        startSemester2,
-        lockSemester2,
-        lockYear,
-        evaluationPeriods, setEvaluationPeriods,
-        updateEvaluationPeriod, // Added
-        calculationPeriod, setCalculationPeriod,
-        updateCalculationPeriod, // Added
-        isGradingOpen,
-        addAcademicYear
+        toggleYearStatus,
+        setSemester,
+        evaluationPeriods,
+        updateEvaluationPeriod,
+        calculationPeriod,
+        updateCalculationPeriod,
+        addAcademicYear,
+        activeYearData,
+        toggleSemesterLock,
+        isSemester1Locked,
+        isSemester2Locked
     } = useAcademicYear();
+
     const { appConfig, updateAppConfig } = useSchool();
     const { showSuccess, showError } = useToast();
 
@@ -266,8 +265,7 @@ const Settings = () => {
                         </div>
                     </div>
 
-                    {/* NEW SECTION: Périodes et Délais */}
-                    {/* NEW SECTION: Périodes et Délais */}
+                    {/* Périodes et Délais */}
                     <div className="mb-6 p-4 border border-blue-100 bg-blue-50/50 rounded-xl space-y-4">
                         <div className="flex items-center space-x-2 text-blue-800 mb-2">
                             <Clock className="w-5 h-5" />
@@ -286,19 +284,7 @@ const Settings = () => {
                                 </thead>
                                 <tbody className="divide-y divide-gray-100">
                                     {Object.entries(evaluationPeriods).map(([key, dates]) => {
-                                        // Logic: MUST be unlocked (true) AND (Either no date set OR within date range)
-                                        // But if unlocked=true and date=past -> Closed.
-                                        // If unlocked=false -> Closed.
-
                                         const isWithinDates = !dates.end || new Date() <= new Date(dates.end).setHours(23, 59, 59);
-                                        // Default is_unlocked to true if not present for legacy, but strictly it should come from DB now.
-                                        // If undefined, assume locked or handle gracefully?
-                                        // Given the issue, we default to dates.dates.is_unlocked
-
-                                        const isUnlocked = dates.is_unlocked !== false; // Default true if undefined? No, context sets default to false.
-                                        // Checking context default: { start: '', end: '', is_unlocked: false }
-                                        // So default is FALSE.
-
                                         const isOpen = dates.is_unlocked && isWithinDates;
 
                                         return (
@@ -358,81 +344,112 @@ const Settings = () => {
                         </div>
                     </div>
 
+                    {/* Gestion de l'Année et Semestres */}
                     <div className="bg-gray-50 rounded-xl p-4 border border-gray-200">
                         <h3 className="font-semibold text-gray-800 mb-3 flex items-center">
                             <Shield className="w-4 h-4 mr-2" />
-                            Actions de Fin de Période
+                            Gestion de l'Année Scolaire
                         </h3>
 
                         <div className="space-y-3">
+                            {/* Year Status & Toggle */}
                             <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
                                 <div className="flex items-center space-x-3">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isSemester1Locked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
-                                        <span className="font-bold text-sm">S1</span>
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-900">Semestre 1</p>
-                                        <p className="text-xs text-gray-500">{isSemester1Locked ? 'Bouclé' : 'En cours'}</p>
-                                    </div>
-                                </div>
-                                {!isSemester1Locked && (
-                                    <button
-                                        onClick={() => handleActionClick(lockSemester1, "Boucler le Semestre 1")}
-                                        className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-200"
-                                    >
-                                        Boucler
-                                    </button>
-                                )}
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                <div className="flex items-center space-x-3">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isSemester2Locked ? 'bg-red-100 text-red-600' : currentSemester === 'Semestre 2' ? 'bg-green-100 text-green-600' : 'bg-gray-100 text-gray-400'}`}>
-                                        <span className="font-bold text-sm">S2</span>
-                                    </div>
-                                    <div>
-                                        <p className="font-medium text-gray-900">Semestre 2</p>
-                                        <p className="text-xs text-gray-500">
-                                            {isSemester2Locked ? 'Bouclé' : currentSemester === 'Semestre 2' ? 'En cours' : 'Non démarré'}
-                                        </p>
-                                    </div>
-                                </div>
-                                {isSemester1Locked && currentSemester !== 'Semestre 2' && (
-                                    <button
-                                        onClick={startSemester2}
-                                        className="px-3 py-1.5 text-sm font-medium text-blue-600 bg-blue-50 hover:bg-blue-100 rounded-lg transition-colors border border-blue-200"
-                                    >
-                                        Démarrer S2
-                                    </button>
-                                )}
-                                {currentSemester === 'Semestre 2' && !isSemester2Locked && (
-                                    <button
-                                        onClick={() => handleActionClick(lockSemester2, "Boucler le Semestre 2")}
-                                        className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-200"
-                                    >
-                                        Boucler
-                                    </button>
-                                )}
-                            </div>
-
-                            <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
-                                <div className="flex items-center space-x-3">
-                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isYearLocked ? 'bg-red-100 text-red-600' : 'bg-gray-100 text-gray-500'}`}>
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center ${isYearLocked ? 'bg-red-100 text-red-600' : 'bg-green-100 text-green-600'}`}>
                                         <School className="w-4 h-4" />
                                     </div>
                                     <div>
-                                        <p className="font-medium text-gray-900">Année Scolaire</p>
-                                        <p className="text-xs text-gray-500">{isYearLocked ? 'Bouclée - Lecture Seule' : 'En cours'}</p>
+                                        <p className="font-medium text-gray-900">Statut de l'Année</p>
+                                        <p className="text-xs text-gray-500">{isYearLocked ? 'Clôturée (Lecture seule)' : 'Ouverte (En cours)'}</p>
                                     </div>
                                 </div>
-                                {isSemester1Locked && isSemester2Locked && !isYearLocked && (
+                                <button
+                                    onClick={() => handleActionClick(toggleYearStatus, isYearLocked ? "Réouvrir l'Année Scolaire" : "Clôturer l'Année Scolaire")}
+                                    className={`px-3 py-1.5 text-sm font-medium rounded-lg transition-colors border ${isYearLocked
+                                        ? 'text-green-600 bg-green-50 hover:bg-green-100 border-green-200'
+                                        : 'text-red-600 bg-red-50 hover:bg-red-100 border-red-200'
+                                        }`}
+                                >
+                                    {isYearLocked ? 'Réouvrir' : 'Clôturer'}
+                                </button>
+                            </div>
+
+                            {/* Semester Locking Toggles */}
+                            <div className="grid grid-cols-2 gap-3">
+                                <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-gray-900 text-sm">Semestre 1</span>
+                                        <span className={`text-xs ${isSemester1Locked ? 'text-red-500' : 'text-green-500'}`}>
+                                            {isSemester1Locked ? 'Verrouillé' : 'Ouvert'}
+                                        </span>
+                                    </div>
                                     <button
-                                        onClick={() => handleActionClick(lockYear, "Boucler l'Année Scolaire")}
-                                        className="px-3 py-1.5 text-sm font-medium text-red-600 bg-red-50 hover:bg-red-100 rounded-lg transition-colors border border-red-200"
+                                        onClick={() => toggleSemesterLock(1)}
+                                        disabled={isYearLocked}
+                                        className={`p-1.5 rounded-md transition-colors ${isSemester1Locked
+                                                ? 'text-red-600 bg-red-50 hover:bg-red-100'
+                                                : 'text-green-600 bg-green-50 hover:bg-green-100'
+                                            } ${isYearLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        title={isSemester1Locked ? "Déverrouiller S1" : "Verrouiller S1"}
                                     >
-                                        Clôturer l'Année
+                                        {isSemester1Locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
                                     </button>
-                                )}
+                                </div>
+
+                                <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                    <div className="flex flex-col">
+                                        <span className="font-medium text-gray-900 text-sm">Semestre 2</span>
+                                        <span className={`text-xs ${isSemester2Locked ? 'text-red-500' : 'text-green-500'}`}>
+                                            {isSemester2Locked ? 'Verrouillé' : 'Ouvert'}
+                                        </span>
+                                    </div>
+                                    <button
+                                        onClick={() => toggleSemesterLock(2)}
+                                        disabled={isYearLocked}
+                                        className={`p-1.5 rounded-md transition-colors ${isSemester2Locked
+                                                ? 'text-red-600 bg-red-50 hover:bg-red-100'
+                                                : 'text-green-600 bg-green-50 hover:bg-green-100'
+                                            } ${isYearLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                        title={isSemester2Locked ? "Déverrouiller S2" : "Verrouiller S2"}
+                                    >
+                                        {isSemester2Locked ? <Lock className="w-4 h-4" /> : <Unlock className="w-4 h-4" />}
+                                    </button>
+                                </div>
+                            </div>
+
+                            {/* Semester Switcher */}
+                            <div className="flex items-center justify-between p-3 bg-white rounded-lg border border-gray-200">
+                                <div className="flex items-center space-x-3">
+                                    <div className={`w-8 h-8 rounded-full flex items-center justify-center bg-blue-100 text-blue-600`}>
+                                        <RefreshCw className="w-4 h-4" />
+                                    </div>
+                                    <div>
+                                        <p className="font-medium text-gray-900">Changer de Semestre Actuel</p>
+                                        <p className="text-xs text-gray-500">Détermine la période active pour les saisies</p>
+                                    </div>
+                                </div>
+                                <div className="flex items-center bg-gray-100 rounded-lg p-1 border border-gray-200">
+                                    <button
+                                        onClick={() => !isYearLocked && setSemester(1)}
+                                        disabled={isYearLocked}
+                                        className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${currentSemester === 'Semestre 1'
+                                            ? 'bg-white text-blue-600 shadow-sm'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            } ${isYearLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        Semestre 1
+                                    </button>
+                                    <button
+                                        onClick={() => !isYearLocked && setSemester(2)}
+                                        disabled={isYearLocked}
+                                        className={`px-3 py-1 text-sm font-medium rounded-md transition-all ${currentSemester === 'Semestre 2'
+                                            ? 'bg-white text-blue-600 shadow-sm'
+                                            : 'text-gray-500 hover:text-gray-700'
+                                            } ${isYearLocked ? 'opacity-50 cursor-not-allowed' : ''}`}
+                                    >
+                                        Semestre 2
+                                    </button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -532,4 +549,3 @@ const Settings = () => {
 };
 
 export default Settings;
-

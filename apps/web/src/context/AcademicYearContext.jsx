@@ -17,14 +17,12 @@ export const AcademicYearProvider = ({ children }) => {
     const [availableYears, setAvailableYears] = useState([]);
     const [selectedYear, setSelectedYear] = useState(() => localStorage.getItem('selectedYear') || '2025-2026');
 
-    // Basic State
+    // Active Year Data (Full Object from DB)
+    const [activeYearData, setActiveYearData] = useState(null);
+
+    // Basic State (Legacy compatibility, but driven by activeYearData for logic)
     const [academicYear, setAcademicYear] = useState(() => localStorage.getItem('academicYear') || '2025-2026');
     const [currentSemester, setCurrentSemester] = useState(() => localStorage.getItem('currentSemester') || 'Semestre 1');
-
-    // Locking State
-    const [isSemester1Locked, setIsSemester1Locked] = useState(() => localStorage.getItem('isSemester1Locked') === 'true');
-    const [isSemester2Locked, setIsSemester2Locked] = useState(() => localStorage.getItem('isSemester2Locked') === 'true');
-    const [isYearLocked, setIsYearLocked] = useState(() => localStorage.getItem('isYearLocked') === 'true');
 
     // Deadline State - Synced with DB 'censor_unlocks'
     const [evaluationPeriods, setEvaluationPeriods] = useState({
@@ -86,7 +84,7 @@ export const AcademicYearProvider = ({ children }) => {
 
     const fetchAcademicYears = async () => {
         try {
-            const { data, error } = await supabase.from('academic_years').select('name, is_active');
+            const { data, error } = await supabase.from('academic_years').select('*');
             if (error) throw error;
             if (data && data.length > 0) {
                 const years = data.map(y => y.name).sort();
@@ -95,8 +93,18 @@ export const AcademicYearProvider = ({ children }) => {
                 // Sync current active year if found
                 const active = data.find(y => y.is_active);
                 if (active) {
+                    setActiveYearData(active);
                     setAcademicYear(active.name);
+
+                    // Sync semester from DB
+                    const semesterName = active.current_semester === 2 ? 'Semestre 2' : 'Semestre 1';
+                    setCurrentSemester(semesterName);
+
                     if (!selectedYear) setSelectedYear(active.name);
+                } else {
+                    // Fallback if no active year? Just pick the last one or something?
+                    // If we are just viewing archives, that is fine.
+                    setActiveYearData(null);
                 }
             }
         } catch (err) {
@@ -110,7 +118,6 @@ export const AcademicYearProvider = ({ children }) => {
     }, []);
 
     // --- UPDATE DB WHEN STATE CHANGES ---
-    // Instead of auto-saving on effect (which risks loops), we'll Expose an update function
     const updateEvaluationPeriod = async (key, updates) => {
         // updates: { start, end, is_unlocked }
         // 1. Update Local State
@@ -132,15 +139,7 @@ export const AcademicYearProvider = ({ children }) => {
         }
 
         try {
-            // Upsert into DB
-            // Check if exists first or use upsert constraint if we had unique (type, index)
-            // Assuming (type, index) is unique or we can query ID.
-            // Let's look up ID first? Or use single upsert if we defined unique constraint.
-            // Safe bet: Select, then Update or Insert.
-
             const { data: existing } = await supabase.from('censor_unlocks').select('id').eq('type', type).eq('index', index).single();
-
-            // Get current state values to ensure we don't overwrite with nulls
             const current = evaluationPeriods[key] || {};
 
             const payload = {
@@ -165,33 +164,22 @@ export const AcademicYearProvider = ({ children }) => {
     };
 
     const updateCalculationPeriod = async (updates) => {
-        // updates: { start, end }
         setCalculationPeriod(prev => ({ ...prev, ...updates }));
 
         try {
-            const { data: existing } = await supabase
-                .from('censor_unlocks')
-                .select('id')
-                .eq('type', 'CALCULATION')
-                .eq('index', 1)
-                .single();
+            const { data: existing } = await supabase.from('censor_unlocks').select('id').eq('type', 'CALCULATION').eq('index', 1).single();
 
             const payload = {
                 type: 'CALCULATION',
                 index: 1,
-                start_date: updates.start !== undefined ? updates.start : calculationPeriod.start, // Handle partial updates carefully
+                start_date: updates.start !== undefined ? updates.start : calculationPeriod.start,
                 end_date: updates.end !== undefined ? updates.end : calculationPeriod.end,
                 updated_at: new Date()
             };
 
-            // Fix: ensure we use the merged state for payload or pass full object
-            // Better: use the 'updates' merged with current state
-            const newStart = updates.start !== undefined ? updates.start : calculationPeriod.start;
-            const newEnd = updates.end !== undefined ? updates.end : calculationPeriod.end;
-
-            payload.start_date = newStart || null;
-            payload.end_date = newEnd || null;
-
+            // Clean payload
+            if (payload.start_date === '') payload.start_date = null;
+            if (payload.end_date === '') payload.end_date = null;
 
             if (existing) {
                 await supabase.from('censor_unlocks').update(payload).eq('id', existing.id);
@@ -205,23 +193,112 @@ export const AcademicYearProvider = ({ children }) => {
         }
     };
 
+    // --- LOCKING & SEMESTER LOGIC ---
+
+    // Derived Locks based on Active Year Data
+    // User Requirement: "c'est quand on cloture l'année que les deux semestres seront considérés comme bouclés"
+
+    // If year is NOT active (closed), everything is locked.
+    // If we are viewing an archive, it is locked.
+    const isYearLocked = isArchiveView || (activeYearData && !activeYearData.is_active);
+
+    // Semesters are locked ONLY if the year is locked OR individual lock is active
+    const isSemester1Locked = isYearLocked || (activeYearData && activeYearData.is_semester1_locked);
+    const isSemester2Locked = isYearLocked || (activeYearData && activeYearData.is_semester2_locked);
+
+    // Actions involving DB updates
+
+    const setSemester = async (semesterNum) => {
+        if (!activeYearData) return;
+
+        try {
+            const { error } = await supabase
+                .from('academic_years')
+                .update({ current_semester: semesterNum })
+                .eq('id', activeYearData.id);
+
+            if (error) throw error;
+
+            // Update local state
+            setActiveYearData(prev => ({ ...prev, current_semester: semesterNum }));
+            setCurrentSemester(semesterNum === 2 ? 'Semestre 2' : 'Semestre 1');
+            showSuccess(`Passage au Semestre ${semesterNum} effectué`);
+        } catch (err) {
+            console.error("Error setting semester:", err);
+            showError("Erreur lors du changement de semestre");
+        }
+    };
+
+    const toggleYearStatus = async () => {
+        if (!activeYearData) return;
+
+        const newStatus = !activeYearData.is_active; // Toggle
+
+        try {
+            const { error } = await supabase
+                .from('academic_years')
+                .update({
+                    is_active: newStatus,
+                    // Note: We do NOT toggle individual semester locks here anymore,
+                    // we keep their independent state. The 'isYearLocked' will override them anyway.
+                })
+                .eq('id', activeYearData.id);
+
+            if (error) throw error;
+
+            setActiveYearData(prev => ({
+                ...prev,
+                is_active: newStatus
+            }));
+
+            showSuccess(newStatus ? "Année réouverte avec succès" : "Année clôturée avec succès");
+        } catch (err) {
+            console.error("Error toggling year status:", err);
+            showError("Erreur lors de la modification du statut de l'année");
+        }
+    };
+
+    const toggleSemesterLock = async (semesterNum) => {
+        if (!activeYearData) return;
+        if (isYearLocked) {
+            showError("Impossible de modifier les semestres quand l'année est clôturée.");
+            return;
+        }
+
+        const field = semesterNum === 1 ? 'is_semester1_locked' : 'is_semester2_locked';
+        const currentVal = activeYearData[field];
+        const newVal = !currentVal;
+
+        try {
+            const { error } = await supabase
+                .from('academic_years')
+                .update({ [field]: newVal })
+                .eq('id', activeYearData.id);
+
+            if (error) throw error;
+
+            setActiveYearData(prev => ({
+                ...prev,
+                [field]: newVal
+            }));
+
+            showSuccess(`Semestre ${semesterNum} ${newVal ? 'verrouillé' : 'déverrouillé'}`);
+        } catch (err) {
+            console.error(`Error toggling semester ${semesterNum}:`, err);
+            showError("Erreur lors de la modification du semestre");
+        }
+    };
 
     // Check if grading is open for a specific type
     const isGradingOpenFor = (type) => {
-        if (isArchiveView || isYearLocked) return false;
+        if (isYearLocked) return false;
 
         const period = evaluationPeriods[type];
         if (!period) return false;
 
-        // Logic Change: is_unlocked is the MASTER switch.
-        // If LOCKED (false) -> Closed immediately.
-        // If UNLOCKED (true) -> Open, UNLESS dates restrict it?
-        // Usually 'locked' means 'force closed'.
-        // So:
         if (!period.is_unlocked) return false;
 
-        // If unlocked, check dates
-        if (!period.end) return true; // Unlocked and no end date = Open forever
+        if (!period.end) return true;
 
         const deadline = new Date(period.end);
         const now = new Date();
@@ -229,148 +306,82 @@ export const AcademicYearProvider = ({ children }) => {
         return now <= deadline;
     };
 
-    // Generic check for overall openness (legacy support if needed)
-    const isGradingOpen = () => true;
+    const isGradingOpen = () => !isYearLocked;
 
-    // Mock Validation: Check if all grades are entered for a semester
-    const checkAllGradesEntered = (semester) => {
-        // In a real app, this would query the database/state.
-        // For now, we mock it.
-        // Let's assume grades are missing unless a specific debug flag is set or we just randomness?
-        // Better: let's assume valid for now to make it testing easier, 
-        // OR add a "Simulate Missing Grades" toggle in settings?
-        // Let's just return true for now, but logical place for the check.
-        console.log(`Checking grades for ${semester}...`);
-
-        // MOCK: Return false randomly or based on a hardcoded check to demonstrate the feature?
-        // Let's return TRUE so the user can lock by default, 
-        // but adding a comment that this is where the query goes.
-        return true;
-    };
-
-    // Persistence
-    useEffect(() => {
-        localStorage.setItem('academicYear', academicYear);
-        localStorage.setItem('currentSemester', currentSemester);
-        localStorage.setItem('isSemester1Locked', isSemester1Locked);
-        localStorage.setItem('isSemester2Locked', isSemester2Locked);
-        localStorage.setItem('isYearLocked', isYearLocked);
-        localStorage.setItem('availableYears', JSON.stringify(availableYears));
-        localStorage.setItem('selectedYear', selectedYear);
-        // localStorage.setItem('calculationPeriod', JSON.stringify(calculationPeriod)); // Removed persistence
-        // Removed evaluationPeriods from local storage persistence
-    }, [academicYear, currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, availableYears, selectedYear]);
-
-
-    // Actions
     const changeYear = (year) => {
         setSelectedYear(year);
-        // Reset current semester view or keep it generic? 
-        // For now, staying on the semester view but with data from that year makes sense if we architecture it well.
-        // However, if we just want to VIEW archives, likely we reset to 'Semestre 1' or keep it as is.
     };
 
-    const lockSemester1 = () => {
-        if (isArchiveView) return;
-
-        if (!checkAllGradesEntered('Semestre 1')) {
-            alert("Impossible de boucler le semestre : Toutes les notes n'ont pas encore été saisies.");
-            return;
-        }
-
-        setIsSemester1Locked(true);
-        showSuccess("Semestre 1 verrouillé avec succès");
-    };
-
-    const startSemester2 = () => {
-        if (isArchiveView) return;
-        if (!isSemester1Locked) return;
-        setCurrentSemester('Semestre 2');
-    };
-
-    const lockSemester2 = () => {
-        if (isArchiveView) return;
-        if (currentSemester !== 'Semestre 2') return;
-
-        if (!checkAllGradesEntered('Semestre 2')) {
-            alert("Impossible de boucler le semestre : Toutes les notes n'ont pas encore été saisies.");
-            return;
-        }
-
-        setIsSemester2Locked(true);
-        showSuccess("Semestre 2 verrouillé avec succès");
-    };
-
-    const lockYear = () => {
-        if (isArchiveView) return;
-        if (isSemester1Locked && isSemester2Locked) {
-            if (!checkAllGradesEntered('Annee')) { // Optional redundant check
-                alert("Impossible de boucler l'année : Vérifications manquantes.");
-                return;
-            }
-            setIsYearLocked(true);
-            showSuccess("Année académique verrouillée avec succès");
-        }
-    };
-
-    const resetYear = () => { };
-
-    const addAcademicYear = (newYear) => {
-        // Enforce constraint: Current year must be locked
+    const addAcademicYear = async (newYearName) => {
+        // Enforce constraint: Current year must be locked (cloturée)
         if (!isYearLocked && !isArchiveView) {
-            alert("Impossible de créer une nouvelle année tant que l'année en cours n'est pas clôturée.");
+            showError("Veuillez clôturer l'année en cours avant d'en créer une nouvelle.");
             return;
         }
 
-        if (!availableYears.includes(newYear)) {
-            const updatedYears = [...availableYears, newYear].sort();
-            setAvailableYears(updatedYears);
+        try {
+            // 1. Deactivate all years (just to be safe, though strict toggle above handles current)
+            await supabase.from('academic_years').update({ is_active: false }).neq('id', -1);
 
-            // Switch to the new year and RESET everything
-            setAcademicYear(newYear);
-            setSelectedYear(newYear);
+            // 2. Insert new year
+            const { data, error } = await supabase
+                .from('academic_years')
+                .insert([{
+                    name: newYearName,
+                    is_active: true,
+                    current_semester: 1,
+                    is_semester1_locked: false,
+                    is_semester2_locked: false
+                }])
+                .select()
+                .single();
+
+            if (error) throw error;
+
+            // 3. Update State
+            setAvailableYears(prev => [...prev, newYearName].sort());
+            setAcademicYear(newYearName);
+            setSelectedYear(newYearName);
+            setActiveYearData(data);
             setCurrentSemester('Semestre 1');
 
-            setIsSemester1Locked(false);
-            setIsSemester2Locked(false);
-            setIsYearLocked(false);
+            showSuccess(`Nouvelle année ${newYearName} activée`);
 
-            setEvaluationPeriods({
-                interrogation1: { start: '', end: '', is_unlocked: false },
-                interrogation2: { start: '', end: '', is_unlocked: false },
-                interrogation3: { start: '', end: '', is_unlocked: false },
-                devoir1: { start: '', end: '', is_unlocked: false },
-                devoir2: { start: '', end: '', is_unlocked: false },
-            });
-            setCalculationPeriod({ start: '', end: '' });
-
-            // Optional: You might want to clear or archive data here in a real app
+        } catch (err) {
+            console.error("Error adding academic year:", err);
+            showError("Erreur lors de la création de la nouvelle année");
         }
     };
 
     const value = {
-        academicYear, // The *Active* current year for writing
+        academicYear,
         setAcademicYear,
         availableYears,
-        selectedYear, // The year being *Viewed*
+        selectedYear,
         changeYear,
-        isArchiveView, // Flag to disable edits
+        isArchiveView,
         currentSemester,
-        isSemester1Locked,
-        isSemester2Locked,
-        isYearLocked: isYearLocked || isArchiveView, // Treat archives as locked years
-        lockSemester1,
-        startSemester2,
-        lockSemester2,
-        lockYear,
-        evaluationPeriods, setEvaluationPeriods, // NOTE: setEvaluationPeriods is now unsafe to call directly for DB sync. Use updateEvaluationPeriod.
-        updateEvaluationPeriod, // New exposed function
+
+        // Exposed Locking State
+        isSemester1Locked, // Derived
+        isSemester2Locked, // Derived
+        isYearLocked,      // Derived
+
+        // New Methods
+        setSemester,
+        toggleYearStatus,
+        toggleSemesterLock,
+
+        evaluationPeriods, setEvaluationPeriods,
+        updateEvaluationPeriod,
         isGradingOpenFor,
-        calculationPeriod, setCalculationPeriod, // Keep set for local, but prefer update
+        calculationPeriod, setCalculationPeriod,
         updateCalculationPeriod,
         isGradingOpen,
         addAcademicYear,
-        loadingPeriods
+        loadingPeriods,
+
+        activeYearData // Exposed for UI to know if active
     };
 
     return (

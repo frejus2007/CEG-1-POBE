@@ -32,6 +32,7 @@ export const SchoolProvider = ({ children }) => {
     const [activeYear, setActiveYear] = useState(null);
     const [notifications, setNotifications] = useState([]);
     const [appConfig, setAppConfig] = useState(null);
+    const [coefficients, setCoefficients] = useState([]); // New State
     const [systemStats, setSystemStats] = useState({
         missingGrades: 0,
         totalExpected: 0,
@@ -62,8 +63,39 @@ export const SchoolProvider = ({ children }) => {
                 is_read: false
             }));
 
-            const { error } = await supabase.from('notifications').insert(payloads);
+            const { data: insertedRecord, error } = await supabase.from('notifications').insert(payloads).select();
             if (error) throw error;
+
+            console.log("Notification saved to DB, triggering Push via Edge Function...");
+
+            // Invoke Edge Function for Push
+            // We send the first record as representative, or handle multiple if Edge supports it.
+            // The current Edge function snippet expects { record } which is a single object.
+            // We'll iterate or send one for now. The Edge Function structure viewed supports 'record'.
+            // To be robust, we should probably update Edge to handle batch, but for now let's trigger for each or just the first to test.
+            // Better: update the Edge function? No, let's just trigger for the first one as a "Group" or trigger individually?
+            // "insertedRecord" is an array.
+
+            // For this iteration, let's try to trigger for each new notification to ensure delivery.
+            // Or better, if we send to multiple people, maybe the FE loop isn't ideal.
+            // However, the current Edge function implementation: `const { record } = payload`.
+
+            // Let's loop and invoke to be safe with current Edge implementation
+            for (const rec of insertedRecord) {
+                supabase.functions.invoke('push-notification', {
+                    body: { record: rec }
+                }).then(({ data, error }) => {
+                    if (error) {
+                        console.error("Push invocation error:", error);
+                        // Attempt to log the actual response message if available
+                        if (error && typeof error === 'object') {
+                            console.error("Error Details:", JSON.stringify(error, null, 2));
+                        }
+                    }
+                    else console.log("Push invoked:", data);
+                });
+            }
+
             await refreshData();
             showSuccess("Notification envoyée avec succès");
             return { success: true };
@@ -85,6 +117,8 @@ export const SchoolProvider = ({ children }) => {
         setAssignments([]);
         setStudents([]);
     };
+
+
 
     // Initialize Auth & Data
     useEffect(() => {
@@ -195,6 +229,7 @@ export const SchoolProvider = ({ children }) => {
             // 3. Teachers (Active)
             const teachersData = await parallelFetch('profiles', `*, subject:subjects!specialty_subject_id (name)`, (q) =>
                 q.in('role', ['TEACHER', 'PRINCIPAL_TEACHER', 'CENSEUR'])
+                    .eq('is_approved', true)
             );
 
             // 3b. Pending Teachers (from View)
@@ -250,6 +285,14 @@ export const SchoolProvider = ({ children }) => {
                 .maybeSingle();
             if (!configError) setAppConfig(configData);
 
+            // 10. Coefficients
+            const { data: coeffData, error: coeffError } = await supabase
+                .from('subject_coefficients')
+                .select('*, subject:subjects(name)');
+            if (coeffError) console.error("Error fetching coefficients:", coeffError);
+
+            // Flatten or map for easier usage?
+            // Let's keep it raw, we can handle it in utils.
 
             // --- TRANSFORM DATA ---
 
@@ -368,6 +411,7 @@ export const SchoolProvider = ({ children }) => {
             setTeachers(formattedTeachers);
             setAssignments(formattedAssignments);
             setStudents(formattedStudents);
+            setCoefficients(coeffData || []);
 
             // --- CALCULATE SYSTEM STATS ---
             const totalStudents = currentYearStudents.length;
@@ -408,6 +452,34 @@ export const SchoolProvider = ({ children }) => {
     useEffect(() => {
         if (user?.id) {
             refreshData();
+
+            // Realtime subscription for notifications
+            const channel = supabase
+                .channel('public:notifications')
+                .on(
+                    'postgres_changes',
+                    {
+                        event: 'INSERT',
+                        schema: 'public',
+                        table: 'notifications',
+                        filter: `receiver_id=eq.${user.id}`
+                    },
+                    (payload) => {
+                        console.log("New notification received:", payload);
+                        const newNotif = payload.new;
+
+                        // Update state
+                        setNotifications(prev => [newNotif, ...prev]);
+
+                        // Show toast
+                        showInfo(`Nouveau message: ${newNotif.title}`, 4000);
+                    }
+                )
+                .subscribe();
+
+            return () => {
+                supabase.removeChannel(channel);
+            };
         }
     }, [user?.id]);
 
@@ -672,41 +744,123 @@ export const SchoolProvider = ({ children }) => {
     };
 
     // --- GRADES MANAGEMENT ---
+
+    // New Helper to manage Evaluations (Parent of Grades)
+    const ensureEvaluationExists = async (classId, subjectId, semesterStr, typeStr) => {
+        // Map string types to DB types/indices
+        // semesterStr: "Semestre 1" -> 1
+        const semester = semesterStr === "Semestre 1" ? 1 : 2;
+
+        let type = 'Interrogation';
+        let index = 1;
+
+        if (typeStr.startsWith('interro')) {
+            type = 'Interrogation';
+            const num = typeStr.replace('interro', '');
+            index = parseInt(num) || 1;
+        } else if (typeStr.startsWith('devoir')) {
+            type = 'Devoir';
+            const num = typeStr.replace('devoir', '');
+            index = parseInt(num) || 1;
+        }
+
+        // Check if exists
+        const { data: existing, error: fetchErr } = await supabase
+            .from('evaluations')
+            .select('id')
+            .eq('class_id', classId)
+            .eq('subject_id', subjectId)
+            .eq('semester', semester)
+            .eq('type', type)
+            .eq('type_index', index)
+            .maybeSingle();
+
+        if (fetchErr) throw fetchErr;
+        if (existing) return existing.id;
+
+        // Create if not exists
+        // Need current user ID for created_by
+        const { data: { user } } = await supabase.auth.getUser();
+        if (!user) throw new Error("User not authenticated");
+
+        const payload = {
+            title: `${type} ${index} - ${semesterStr}`,
+            class_id: classId,
+            subject_id: subjectId,
+            semester: semester,
+            type: type,
+            type_index: index,
+            created_by: user.id
+        };
+
+        const { data: newEval, error: createErr } = await supabase
+            .from('evaluations')
+            .insert(payload)
+            .select()
+            .single();
+
+        if (createErr) throw createErr;
+        return newEval.id;
+    };
+
     const saveGrade = async (gradeData) => {
-        // gradeData: { studentId, subjectName, semester, type, value }
-        // If subjectName stored in grades table, great.
-        // We defined unique constraint on (student_id, subject_name, semester, grade_type)
+        // gradeData: { studentId, subjectId, classId, semester, type, value }
+        // NEW: We need classId in gradeData to find/create evaluation!
         try {
-            // Basic upsert matching the UNIQUE constraint
+            if (!gradeData.classId) throw new Error("Class ID missing for saveGrade");
+
+            // 1. Get/Create Evaluation ID
+            const evaluationId = await ensureEvaluationExists(
+                gradeData.classId,
+                gradeData.subjectId,
+                gradeData.semester,
+                gradeData.type
+            );
+
+            // 2. Upsert Grade
             const payload = {
                 student_id: gradeData.studentId,
-                subject_name: gradeData.subjectName, // Until we migrate to IDs completely
-                semester: gradeData.semester,
-                grade_type: gradeData.type,
-                value: gradeData.value,
+                evaluation_id: evaluationId,
+                note: gradeData.value, // Column is 'note' in schema
                 updated_at: new Date()
             };
 
-            // Match on constraint to update or insert
-            const { error } = await supabase.from('grades').upsert(payload, {
-                onConflict: 'student_id, subject_name, semester, grade_type'
-            });
+            // Schema: constraints on unique? 
+            // grades table doesn't have unique (student_id, evaluation_id) explicitly shown in user prompt schema warning,
+            // but usually it should. Or we rely on ID.
+            // But we don't have grade ID here.
+            // Let's assume (student_id, evaluation_id) is unique or we query first?
+            // "upsert" requires a constraint name or primary key.
+            // If constraint checks student_id + evaluation_id, we are good.
+            // If not, we might create duplicates if we just insert.
+
+            // Safe approach: Check if grade exists for this student & evaluation
+            const { data: existingGrade } = await supabase
+                .from('grades')
+                .select('id')
+                .eq('student_id', gradeData.studentId)
+                .eq('evaluation_id', evaluationId)
+                .maybeSingle();
+
+            let error;
+            if (existingGrade) {
+                const { error: upErr } = await supabase
+                    .from('grades')
+                    .update({ note: gradeData.value, updated_at: new Date() })
+                    .eq('id', existingGrade.id);
+                error = upErr;
+            } else {
+                const { error: inErr } = await supabase
+                    .from('grades')
+                    .insert(payload);
+                error = inErr;
+            }
 
             if (error) throw error;
-
-            // Optimistic update or refresh? Refresh is safer to sync everything.
-            // We can optimize later.
-            // await refreshData(); 
-            // Actually, refreshData re-reads ALL students and grades. Might be slow.
-            // But for now, correctness > speed.
-
-            // Let's NOT await refreshData for every keystroke if it's debounced, 
-            // but assuming user clicks "Save" button in Grades.jsx, we can refresh.
-
             return { success: true };
         } catch (err) {
             console.error("Error saving grade:", err);
-            showError("Erreur lors de l'enregistrement de la note");
+            // showError("Erreur lors de l'enregistrement de la note"); // Optional: don't spam toasts
             return { success: false, error: err.message };
         }
     };
@@ -843,6 +997,7 @@ export const SchoolProvider = ({ children }) => {
         sendNotification,
         validateHeadTeacherAssignment,
         appConfig,
+        coefficients,
         updateAppConfig,
         systemStats,
         loading,

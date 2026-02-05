@@ -1,82 +1,73 @@
-
 import { serve } from "https://deno.land/std@0.168.0/http/server.ts"
 import { createClient } from "https://esm.sh/@supabase/supabase-js@2"
+import admin from "npm:firebase-admin@^12.0.0";
 
-// Types pour le payload FCM v1
-interface FcmMessage {
-    message: {
-        notification: {
-            title: string;
-            body: string;
-        };
-        topic?: string;
-        token?: string;
-    };
+const serviceAccountStr = Deno.env.get("FIREBASE_SERVICE_ACCOUNT") ?? "{}";
+const serviceAccount = JSON.parse(serviceAccountStr);
+
+if (Object.keys(serviceAccount).length > 0) {
+    if (admin.apps.length === 0) {
+        admin.initializeApp({
+            credential: admin.credential.cert(serviceAccount)
+        });
+    }
+} else {
+    console.error("FIREBASE_SERVICE_ACCOUNT is empty or invalid.");
 }
 
 serve(async (req) => {
     try {
+        if (!Deno.env.get("FIREBASE_SERVICE_ACCOUNT")) {
+            console.error("Missing FIREBASE_SERVICE_ACCOUNT secret");
+            return new Response(JSON.stringify({ error: "Configuration missing" }), { status: 500 });
+        }
+
         const payload = await req.json()
-        const { record } = payload // La nouvelle ligne insérée dans 'notifications'
+        const { record } = payload
 
         if (!record) {
             return new Response("No record found in payload", { status: 400 });
         }
 
-        console.log("Processing notification:", record.title);
-
-        // 1. Préparer le message pour Firebase
-        const message: FcmMessage = {
-            message: {
-                notification: {
-                    title: record.title,
-                    body: record.content,
-                },
-                // Logique de ciblage : Si target_role est 'ALL', on vise un topic global
-                // Sinon, on pourrait viser un topic spécifique 'teachers', etc.
-                topic: "all_teachers",
-            }
-        };
-
-        // 2. Appel à l'API Firebase (v1) via Google Auth
-        // Note : Pour simplifier l'auth Google dans Deno, on suppose ici que
-        // vous utilisez un Service Account. L'obtention du Bearer Token peut être complexe
-        // en pur Deno sans librairie externe lourde.
-        // Une alternative courante est d'utiliser la REST API avec la clé serveur (Legacy)
-        // ou d'utiliser une librairie `npm:google-auth-library` via esm.sh.
-
-        // Pour cet exemple, nous utilisons la méthode décrite par le développeur
-        // en supposant que FIREBASE_ACCESS_TOKEN est géré/rafraîchi ailleurs ou est une clé serveur valide.
-
-        const projectId = Deno.env.get("FIREBASE_PROJECT_ID");
-        const accessToken = Deno.env.get("FIREBASE_ACCESS_TOKEN");
-
-        if (!projectId || !accessToken) {
-            throw new Error("Missing Firebase configuration");
+        if (!record.receiver_id) {
+            console.log("No receiver_id, skipping push.");
+            return new Response("No receiver_id", { status: 200 });
         }
 
-        const res = await fetch(
-            `https://fcm.googleapis.com/v1/projects/${projectId}/messages:send`,
-            {
-                method: "POST",
-                headers: {
-                    "Content-Type": "application/json",
-                    "Authorization": `Bearer ${accessToken}`,
-                },
-                body: JSON.stringify(message),
-            }
-        )
+        const supabase = createClient(
+            Deno.env.get("SUPABASE_URL") ?? "",
+            Deno.env.get("SUPABASE_SERVICE_ROLE_KEY") ?? ""
+        );
 
-        const responseText = await res.text();
-        console.log("Firebase response:", responseText);
+        const { data: profile } = await supabase
+            .from('profiles')
+            .select('fcm_token')
+            .eq('id', record.receiver_id)
+            .single();
 
-        return new Response(responseText, {
+        if (!profile?.fcm_token) {
+            console.log(`No FCM token for user ${record.receiver_id}`);
+            return new Response("User has no device token", { status: 200 });
+        }
+
+        const message = {
+            notification: {
+                title: record.title,
+                body: record.content,
+            },
+            token: profile.fcm_token,
+        };
+
+        const response = await admin.messaging().send(message);
+        console.log("Successfully sent message:", response);
+
+        return new Response(JSON.stringify({ success: true, response }), {
             headers: { "Content-Type": "application/json" },
         })
 
-    } catch (error) {
-        console.error("Error:", error.message);
-        return new Response(JSON.stringify({ error: error.message }), {
+    } catch (error: any) {
+        console.error("Error:", error?.message || error);
+        return new Response(JSON.stringify({ error: error?.message || "Unknown error" }), {
             status: 500,
             headers: { "Content-Type": "application/json" },
         })

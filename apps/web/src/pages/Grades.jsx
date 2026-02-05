@@ -1,27 +1,35 @@
 import React, { useState, useEffect } from 'react';
-import { Save, Calculator, Lock, ChevronDown } from 'lucide-react';
+import { Save, Calculator, Lock, ChevronDown, Download, RefreshCw } from 'lucide-react';
 import { useAcademicYear } from '../context/AcademicYearContext';
 import { useSchool } from '../context/SchoolContext';
 import { calculateAverages } from '../utils/gradeUtils';
+import { exportToExcel, formatGradesForExport } from '../utils/exportUtils';
+import { supabase } from '../lib/supabase';
 
-// Mock subjects can be moved to a constants file or context later if dynamic
-const subjects = [
-    "Mathématiques", "Français", "Anglais", "SVT", "Physique-Chimie",
-    "Histoire-Géo", "EPS", "Allemand", "Espagnol", "Philosophie",
-    "Communication Écrite", "Lecture"
-];
+// Mock subjects removed, using context
+
 
 const Grades = () => {
     const { currentSemester, isSemester1Locked, isSemester2Locked, isYearLocked, isGradingOpen } = useAcademicYear();
-    const { classes, students: globalStudents, saveGrade } = useSchool();
+    const { classes, students: globalStudents, saveGrade, coefficients, subjects } = useSchool(); // Get subjects from context
 
     // Default to first class if available
     const [selectedClass, setSelectedClass] = useState(classes.length > 0 ? classes[0].name : "");
-    const [selectedSubject, setSelectedSubject] = useState(subjects[0]);
+
+    // Default subject - handle if subjects array is empty initially
+    const [selectedSubject, setSelectedSubject] = useState("");
     const [selectedViewSemester, setSelectedViewSemester] = useState("Semestre 1");
+
+    // Update selected subject when subjects load
+    useEffect(() => {
+        if (subjects.length > 0 && !selectedSubject) {
+            setSelectedSubject(subjects[0].name);
+        }
+    }, [subjects, selectedSubject]);
 
     // Local state for the table (filtered students)
     const [localStudents, setLocalStudents] = useState([]);
+    const [isLoadingGrades, setIsLoadingGrades] = useState(false);
 
     // Ensure we have a default class when data loads
     useEffect(() => {
@@ -34,13 +42,102 @@ const Grades = () => {
     useEffect(() => {
         if (!selectedClass) return;
 
-        // Filter students for the selected class
+        // Filter students for the selected class from context
         const classStudents = globalStudents.filter(s => s.class === selectedClass);
 
         // Sort alphabetically by Name
         const sortedStudents = [...classStudents].sort((a, b) => a.nom.localeCompare(b.nom));
+
+        // Initialize local students (will be enriched by fetch below)
         setLocalStudents(sortedStudents);
-    }, [selectedClass, globalStudents]); // Depend on globalStudents to refresh if saved
+    }, [selectedClass, globalStudents]);
+
+    // FETCH GRADES from Database
+    useEffect(() => {
+        const fetchGradesForSelection = async () => {
+            // Need students to be loaded first
+            if (!selectedClass || !selectedSubject || localStudents.length === 0) return;
+
+            // Avoid infinite loop if we are just updating localStudents from this effect?
+            // No, localStudents.length check might be dangerous if empty class.
+            // Better: Depend on selectedClass/Subject and execute.
+        };
+        // We handle this logic below to avoid conflicts with the previous effect
+    }, []);
+
+    // Combined Effect: When [selectedClass, selectedSubject, globalStudents] changes
+    useEffect(() => {
+        const loadData = async () => {
+            if (!selectedClass || !selectedSubject) return;
+
+            const classStudents = globalStudents.filter(s => s.class === selectedClass);
+            if (classStudents.length === 0) {
+                setLocalStudents([]);
+                return;
+            }
+
+            // Find subject ID
+            const subjectObj = subjects.find(s => s.name === selectedSubject);
+            if (!subjectObj) { console.warn("Subject not found"); return; }
+
+            // Find Class ID (needed for fetch filter)
+            const classObj = classes.find(c => c.name === selectedClass);
+            if (!classObj) { console.warn("Class not found"); return; }
+
+            setIsLoadingGrades(true);
+            try {
+                const studentIds = classStudents.map(s => s.id);
+
+                // Fetch grades RELATIONAL
+                // Join evaluations to check subject, class, semester
+                const { data: gradesData, error } = await supabase
+                    .from('grades')
+                    .select('*, evaluation:evaluations!inner(*)')
+                    .in('student_id', studentIds)
+                    .eq('evaluation.subject_id', subjectObj.id)
+                    .eq('evaluation.class_id', classObj.id);
+
+                if (error) throw error;
+
+                // Merge
+                const mergedStudents = classStudents.map(student => {
+                    const sGrades = gradesData.filter(g => g.student_id === student.id);
+                    const currentGrades = { ...student.grades };
+
+                    if (!currentGrades[selectedSubject]) currentGrades[selectedSubject] = {};
+
+                    sGrades.forEach(g => {
+                        // g.evaluation has info
+                        const evalInfo = g.evaluation; // { semester, type, type_index ... }
+                        const semStr = evalInfo.semester === 1 ? 'Semestre 1' : 'Semestre 2';
+
+                        // Map DB type/index to UI keys 
+                        // Interrogation + 1 -> "interro1"
+                        let gradeKey = '';
+                        if (evalInfo.type === 'Interrogation') gradeKey = `interro${evalInfo.type_index}`;
+                        else if (evalInfo.type === 'Devoir') gradeKey = `devoir${evalInfo.type_index}`;
+
+                        if (gradeKey) {
+                            if (!currentGrades[selectedSubject][semStr]) currentGrades[selectedSubject][semStr] = {};
+                            currentGrades[selectedSubject][semStr][gradeKey] = g.note; // 'note' is the column
+                        }
+                    });
+
+                    return { ...student, grades: currentGrades };
+                });
+
+                setLocalStudents(mergedStudents.sort((a, b) => a.nom.localeCompare(b.nom)));
+
+            } catch (err) {
+                console.error("Error loading grades:", err);
+            } finally {
+                setIsLoadingGrades(false);
+            }
+        };
+
+        loadData();
+    }, [selectedClass, selectedSubject, globalStudents, subjects, classes]); // Depend on subjects and classes too
+
 
     // Helpers to safely get/set deep grade values
     const getStudentGrades = (student) => {
@@ -77,39 +174,31 @@ const Grades = () => {
 
     const handleSave = async () => {
         setIsSaving(true);
-        let errorCount = 0;
-
-        // Strategy: We compare localStudents with initial data (or just save all that changed)
-        // For simplicity, we can iterate over all grades of all students in viewing context.
-        // Or better: Track changes?
-        // Current implementation: We have localStudents with updated grades.
-
-        // We will just iterate and upsert non-empty grades OR all grades to be safe?
-        // Saving everything might be heavy. 
-        // Let's iterate over localStudents and send each grade value.
-
         const promises = [];
 
+        // Resolve subject ID & Class ID
+        const subjectObj = subjects.find(s => s.name === selectedSubject);
+        const classObj = classes.find(c => c.name === selectedClass);
+
+        if (!subjectObj || !classObj) {
+            alert("Erreur: Matière ou Classe introuvable");
+            setIsSaving(false);
+            return;
+        }
+
         for (const student of localStudents) {
-            // student.grades = { [subject]: { [semester]: { interro1: val ... } } }
             const subjectGrades = student.grades?.[selectedSubject]?.[selectedViewSemester];
             if (!subjectGrades) continue;
 
-            // Iterate over keys
             for (const [type, value] of Object.entries(subjectGrades)) {
-                // Value "" or null? We might want to save null to clear it?
-                // But upsert with value "" might default to 0 or error if numeric.
-                // Database value is DECIMAL.
-                // If value is "", we should probably save NULL.
-
                 let numValue = value === "" ? null : parseFloat(value);
 
-                // If it's valid numeric or null
                 promises.push(saveGrade({
+                    classId: classObj.id, // Needed for evaluation check
                     studentId: student.id,
-                    subjectName: selectedSubject,
-                    semester: selectedViewSemester,
-                    type: type,
+                    subjectId: subjectObj.id,
+                    semester: selectedViewSemester, // "Semestre 1"
+                    type: type, // "interro1", "devoir1"
                     value: numValue
                 }));
             }
@@ -128,9 +217,6 @@ const Grades = () => {
             alert("Erreur critique lors de la sauvegarde.");
         } finally {
             setIsSaving(false);
-            // Refresh global data to ensure sync
-            // triggerSchoolRefresh(); // We don't have this exposed yet, but context might auto-refresh?
-            // Actually saveGrade does NOT refresh to rely on manual refresh or we can add it.
         }
     };
 
@@ -138,7 +224,23 @@ const Grades = () => {
     // Note: calculateAverages expects a simple object { interro1: ..., ... }
     const getCalculatedStats = (student) => {
         const grades = getStudentGrades(student);
-        return calculateAverages(grades, selectedClass, selectedSubject);
+        return calculateAverages(grades, selectedClass, selectedSubject, coefficients);
+    };
+
+    const handleExport = () => {
+        if (localStudents.length === 0) {
+            alert("Aucune donnée à exporter.");
+            return;
+        }
+
+        const dataToExport = localStudents.map(student => {
+            const grades = getStudentGrades(student);
+            const stats = getCalculatedStats(student);
+            return formatGradesForExport(student, grades, stats);
+        });
+
+        const fileName = `Notes_${selectedClass}_${selectedSubject}_${selectedViewSemester}`;
+        exportToExcel(dataToExport, fileName);
     };
 
     const isHistGeo = selectedSubject === "Histoire-Géo";
@@ -165,6 +267,13 @@ const Grades = () => {
                     >
                         <Calculator className="w-4 h-4 ml-1" />
                         <span className="hidden sm:inline">Recalculer</span>
+                    </button>
+                    <button
+                        onClick={handleExport}
+                        className="flex items-center justify-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition-colors shadow-sm"
+                    >
+                        <Download className="w-4 h-4" />
+                        <span className="hidden sm:inline">Exporter</span>
                     </button>
                     {!isLocked ? (
                         <button
@@ -210,7 +319,7 @@ const Grades = () => {
                                 onChange={(e) => setSelectedSubject(e.target.value)}
                                 className="w-full appearance-none pl-3 pr-8 py-2.5 bg-gray-50 border border-gray-200 rounded-lg text-gray-900 font-medium focus:ring-2 focus:ring-blue-500 outline-none cursor-pointer hover:border-blue-300 transition-colors"
                             >
-                                {subjects.map(s => <option key={s} value={s}>{s}</option>)}
+                                {subjects.map(s => <option key={s.id} value={s.name}>{s.name}</option>)}
                             </select>
                             <ChevronDown className="w-4 h-4 text-gray-500 absolute right-3 top-1/2 transform -translate-y-1/2 pointer-events-none" />
                         </div>
@@ -238,6 +347,13 @@ const Grades = () => {
 
             {/* Main Grades Table */}
             <div className={`bg-white rounded-xl shadow-sm border border-gray-200 overflow-hidden flex flex-col ${isLocked ? 'opacity-95' : ''}`}>
+
+                {isLoadingGrades && (
+                    <div className="p-4 bg-blue-50 text-blue-600 flex items-center justify-center">
+                        <RefreshCw className="w-4 h-4 animate-spin mr-2" /> Chargement des notes...
+                    </div>
+                )}
+
                 {isLocked && (
                     <div className="bg-orange-50 text-orange-800 px-6 py-3 text-sm font-medium border-b border-orange-100 flex items-center justify-center">
                         <Lock className="w-4 h-4 mr-2" />
@@ -270,7 +386,7 @@ const Grades = () => {
                             {localStudents.length === 0 ? (
                                 <tr>
                                     <td colSpan="10" className="px-6 py-8 text-center text-gray-500 italic">
-                                        Aucun élève trouvé dans cette classe.
+                                        {isLoadingGrades ? "Chargement..." : "Aucun élève trouvé dans cette classe."}
                                     </td>
                                 </tr>
                             ) : (

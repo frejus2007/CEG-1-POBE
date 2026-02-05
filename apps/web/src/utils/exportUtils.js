@@ -66,17 +66,17 @@ export const formatStudentForExport = (student) => {
     };
 };
 
-export const formatGradesForExport = (student, stats) => {
+export const formatGradesForExport = (student, grades, stats) => {
     return {
         Matricule: student.matricule,
         Nom: student.nom,
         Prénom: student.prenom,
-        "Interro 1": student.grades.interro1,
-        "Interro 2": student.grades.interro2,
-        "Interro 3": student.grades.interro3,
+        "Interro 1": grades.interro1,
+        "Interro 2": grades.interro2,
+        "Interro 3": grades.interro3,
         "Moy Interro": stats.avgInterro,
-        "Devoir 1": student.grades.devoir1,
-        "Devoir 2": student.grades.devoir2,
+        "Devoir 1": grades.devoir1,
+        "Devoir 2": grades.devoir2,
         "Moyenne Sem": stats.avgSem,
         "Moyenne Coeff": stats.weightedAvg
     };
