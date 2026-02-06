@@ -1,107 +1,51 @@
 import React, { useState } from 'react';
-import { Users, BookOpen, Plus, Edit2, Trash2, ChevronLeft, Folder, Search } from 'lucide-react';
-import Modal from '../components/ui/Modal';
-import Card from '../components/ui/Card';
+import { useToast } from '../context/ToastContext';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
-import Select from '../components/ui/Select';
 import { useSchool } from '../context/SchoolContext';
+import { ChevronLeft, Plus } from 'lucide-react';
+import Modal from '../components/ui/Modal';
+import Select from '../components/ui/Select';
+import Input from '../components/ui/Input';
+import LevelCard from '../components/LevelCard';
+import ClassCard from '../components/ClassCard';
 
 const LEVELS = ['6ème', '5ème', '4ème', '3ème', '2nde', '1ère', 'Tle'];
 
-const LevelCard = ({ level, classCount, onClick }) => (
-    <div
-        onClick={onClick}
-        className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group flex flex-col items-center justify-center text-center space-y-3 h-48"
-    >
-        <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-            <Folder className="w-8 h-8" />
-        </div>
-        <div>
-            <h3 className="text-xl font-bold text-gray-900">{level}</h3>
-            <p className="text-sm text-gray-500 font-medium">{classCount} Classes</p>
-        </div>
-    </div>
-);
-
-const ClassCard = ({ id, className, students, mainTeacher, subjects, onEdit, onDelete }) => (
-    <Card className="relative group">
-        <div className="absolute top-4 right-4 flex space-x-2 opacity-0 group-hover:opacity-100 transition-opacity">
-            <Button
-                variant="ghost"
-                onClick={(e) => { e.stopPropagation(); onEdit(id); }}
-                className="!p-1 h-auto"
-            >
-                <Edit2 className="w-4 h-4 text-blue-400" />
-            </Button>
-            <Button
-                variant="ghost"
-                onClick={(e) => { e.stopPropagation(); onDelete(id); }}
-                className="!p-1 h-auto"
-            >
-                <Trash2 className="w-4 h-4 text-red-400" />
-            </Button>
-        </div>
-        <div className="w-12 h-12 bg-gray-100 text-gray-600 rounded-xl flex items-center justify-center font-bold text-lg mb-4 group-hover:bg-blue-600 group-hover:text-white transition-colors">
-            {className.split(' ').slice(1).join(' ').substring(0, 2) || (className.length > 3 ? className[0] : className)}
-        </div>
-        <h3 className="text-lg font-bold text-gray-900 mb-1">{className}</h3>
-        <p className="text-sm text-gray-500 mb-4">PP: {mainTeacher}</p>
-
-        <div className="flex items-center justify-between text-sm text-gray-600 border-t border-gray-50 pt-4">
-            <div className="flex items-center">
-                <Users className="w-4 h-4 mr-1.5 text-gray-400" />
-                {students}
-            </div>
-            <div className="flex items-center">
-                <BookOpen className="w-4 h-4 mr-1.5 text-gray-400" />
-                {subjects} Mat.
-            </div>
-        </div>
-    </Card>
-);
-
 const Classes = () => {
     const { classes, addClass, updateClass, deleteClass, getTeachersForClass, validateHeadTeacherAssignment } = useSchool();
+    const { showSuccess, showError } = useToast();
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
         level: '6ème',
         suffix: '',
         mainTeacherId: ''
     });
 
-
-
-    // Determine counts per level
-    const levelCounts = LEVELS.reduce((acc, level) => {
-        acc[level] = classes.filter(c => c.name.startsWith(level + ' ')).length;
+    // Derived Data
+    const levelCounts = classes.reduce((acc, cls) => {
+        acc[cls.level] = (acc[cls.level] || 0) + 1;
         return acc;
     }, {});
 
     const handleAddClass = () => {
         setEditingId(null);
-        setFormData({
-            level: selectedLevel || '6ème',
-            suffix: '',
-            mainTeacherId: ''
-        });
+        setFormData({ level: '6ème', suffix: '', mainTeacherId: '' });
         setIsModalOpen(true);
     };
 
-    const handleEditClass = (id) => {
-        const cls = classes.find(c => c.id === id);
-        if (!cls) return;
-
-        let foundLevel = LEVELS.find(l => cls.name.startsWith(l)) || '6ème';
-        let suffix = cls.name.replace(foundLevel, '').trim();
-
-        setEditingId(id);
+    const handleEditClass = (cls) => {
+        setEditingId(cls.id);
+        // Parse suffix from name (e.g. "6ème M1" -> suffix "M1")
+        // Handle cases where name might just be the level or different format if needed, 
+        // but assuming "Level Suffix" format based on existing code.
+        const suffix = cls.name.replace(cls.level + ' ', '');
         setFormData({
-            level: foundLevel,
+            level: cls.level,
             suffix: suffix,
-            mainTeacherId: cls.mainTeacherId || ''
+            mainTeacherId: cls.mainTeacher ? cls.mainTeacher.id : ''
         });
         setIsModalOpen(true);
     };
@@ -109,44 +53,42 @@ const Classes = () => {
     const handleDeleteClass = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cette classe ?')) {
             const res = await deleteClass(id);
-            if (!res.success) alert(res.error);
+            if (!res.success) showError(res.error);
+            else showSuccess("Classe supprimée avec succès");
         }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setIsSubmitting(true);
         const className = `${formData.level} ${formData.suffix}`;
 
-        // Validate Head Teacher Constraint (Optional/TODO: Update validation for IDs)
-        /*
-        if (formData.mainTeacherId) {
-            const validation = validateHeadTeacherAssignment(formData.mainTeacherId, editingId);
-            if (!validation.valid) {
-                alert(validation.error);
-                return;
+        try {
+            const classData = {
+                name: className,
+                level: formData.level,
+                mainTeacherId: formData.mainTeacherId
+            };
+
+            let res;
+            if (editingId) {
+                res = await updateClass(editingId, classData);
+            } else {
+                res = await addClass(classData);
             }
-        }
-        */
 
-        const classData = {
-            name: className,
-            level: formData.level,
-            mainTeacherId: formData.mainTeacherId
-        };
-
-        let res;
-        if (editingId) {
-            res = await updateClass(editingId, classData);
-        } else {
-            res = await addClass(classData);
-        }
-
-        if (res.success) {
-            setIsModalOpen(false);
-            setFormData({ level: '6ème', suffix: '', mainTeacherId: '' });
-            setEditingId(null);
-        } else {
-            alert("Erreur: " + res.error);
+            if (res.success) {
+                showSuccess(editingId ? "Classe mise à jour" : "Classe ajoutée");
+                setIsModalOpen(false);
+                setFormData({ level: '6ème', suffix: '', mainTeacherId: '' });
+                setEditingId(null);
+            } else {
+                showError("Erreur: " + res.error);
+            }
+        } catch (err) {
+            showError("Une erreur est survenue");
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -212,7 +154,7 @@ const Classes = () => {
                                 key={cls.id}
                                 id={cls.id}
                                 className={cls.name}
-                                students={cls.students}
+                                studentCount={cls.students}
                                 mainTeacher={cls.mainTeacher}
                                 subjects={cls.subjects}
                                 onEdit={handleEditClass}
@@ -294,7 +236,10 @@ const Classes = () => {
                         </Button>
                         <Button
                             type="submit"
+                            disabled={isSubmitting}
+                            className="flex items-center gap-2"
                         >
+                            {isSubmitting && <div className="w-4 h-4 border-2 border-white border-t-transparent rounded-full animate-spin"></div>}
                             {editingId ? "Mettre à jour" : "Enregistrer"}
                         </Button>
                     </div>

@@ -2,7 +2,9 @@ import React, { useState } from 'react';
 import { Search, Plus, Edit2, Trash2 } from 'lucide-react';
 import Modal from '../components/ui/Modal';
 import Select from '../components/ui/Select';
+import Button from '../components/ui/Button';
 import { useSchool } from '../context/SchoolContext';
+import { useToast } from '../context/ToastContext';
 
 const SUBJECTS_CYCLE_1 = [
     "Mathématiques", "SVT", "Physique-Chimie", "Histoire-Géo", "Anglais", "EPS",
@@ -33,10 +35,12 @@ const getTeacherSubjectMatch = (teacher, filterSubjectName, subjects) => {
 };
 
 const Assignments = () => {
+    const { showSuccess } = useToast();
     const { assignments, teachers, classes, subjects, setClasses, validateHeadTeacherAssignment, addAssignment, updateAssignment, deleteAssignment, updateClass } = useSchool();
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [subjectFilter, setSubjectFilter] = useState('');
+    const [isSubmitting, setIsSubmitting] = useState(false);
     const [formData, setFormData] = useState({
         teacherId: '',
         classId: '',
@@ -82,56 +86,66 @@ const Assignments = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setIsSubmitting(true);
 
-        // 1. Handle Head Teacher Assignment (Main Teacher)
-        if (formData.classId && formData.teacherId) {
-            const targetClass = classes.find(c => c.id == formData.classId);
+        try {
+            // 1. Handle Head Teacher Assignment (Main Teacher)
+            if (formData.classId && formData.teacherId) {
+                const targetClass = classes.find(c => c.id == formData.classId);
 
-            if (formData.isMainTeacher) {
-                const validation = validateHeadTeacherAssignment(formData.teacherId, formData.classId);
-                if (!validation.valid) {
-                    alert(validation.error);
-                    return;
-                }
+                if (formData.isMainTeacher) {
+                    const validation = validateHeadTeacherAssignment(formData.teacherId, formData.classId);
+                    if (!validation.valid) {
+                        alert(validation.error);
+                        setIsSubmitting(false);
+                        return;
+                    }
 
-                if (targetClass) {
-                    await updateClass(targetClass.id, {
-                        ...targetClass,
-                        mainTeacherId: formData.teacherId
-                    });
-                }
-            } else {
-                if (targetClass && targetClass.mainTeacherId === formData.teacherId) {
-                    await updateClass(targetClass.id, {
-                        ...targetClass,
-                        mainTeacherId: null
-                    });
+                    if (targetClass) {
+                        await updateClass(targetClass.id, {
+                            ...targetClass,
+                            mainTeacherId: formData.teacherId
+                        }, { skipRefresh: true });
+                    }
+                } else {
+                    if (targetClass && targetClass.mainTeacherId === formData.teacherId) {
+                        await updateClass(targetClass.id, {
+                            ...targetClass,
+                            mainTeacherId: null
+                        });
+                    }
                 }
             }
-        }
 
-        // 2. Handle Subject Assignment
-        const assignmentData = {
-            teacherId: formData.teacherId,
-            classId: formData.classId,
-            subject_id: formData.subjectId,
-            hours: formData.hours
-        };
+            // 2. Handle Subject Assignment
+            const assignmentData = {
+                teacherId: formData.teacherId,
+                classId: formData.classId,
+                subject_id: formData.subjectId,
+                hours: formData.hours
+            };
 
-        let res;
-        if (editingId) {
-            res = await updateAssignment(editingId, assignmentData);
-        } else {
-            res = await addAssignment(assignmentData);
-        }
+            let res;
+            if (editingId) {
+                res = await updateAssignment(editingId, assignmentData);
+            } else {
+                res = await addAssignment(assignmentData);
+            }
 
-        if (res.success) {
-            setIsModalOpen(false);
-            setSubjectFilter('');
-            setFormData({ teacherId: '', classId: '', subjectId: '', hours: '', isMainTeacher: false });
-            setEditingId(null);
-        } else {
-            alert("Erreur: " + res.error);
+            if (res.success) {
+                showSuccess("Affectation enregistrée avec succès");
+                setIsModalOpen(false);
+                setSubjectFilter('');
+                setFormData({ teacherId: '', classId: '', subjectId: '', hours: '', isMainTeacher: false });
+                setEditingId(null);
+            } else {
+                alert("Erreur: " + res.error);
+            }
+        } catch (error) {
+            console.error("Error submitting assignment:", error);
+            alert("Une erreur est survenue lors de l'enregistrement.");
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -197,10 +211,9 @@ const Assignments = () => {
                     <h1 className="text-2xl font-bold text-gray-900">Affectations</h1>
                     <p className="text-gray-500 mt-1">Gestion des attributions de cours par classe</p>
                 </div>
-                <button onClick={handleAddAssignment} className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm">
-                    <Plus className="w-5 h-5" />
-                    <span>Nouvelle Affectation</span>
-                </button>
+                <Button onClick={handleAddAssignment} icon={Plus}>
+                    Nouvelle Affectation
+                </Button>
             </div>
 
             <div className="bg-white rounded-2xl shadow-sm border border-gray-100 overflow-hidden">
@@ -257,15 +270,6 @@ const Assignments = () => {
                                         </td>
                                         <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
                                             <div className="flex items-center justify-end space-x-3">
-                                                {/* For grouped items, we allow editing each or just the first one? 
-                                                    Given the UI, edit might be complex for whole group. 
-                                                    User likely wants simplification for viewing. 
-                                                    I'll show actions for EACH subject if it's too cramped, 
-                                                    but let's try a simple approach: Actions per group but targeting individual? 
-                                                    Actually, let's just group the subjects in the cell but keep rows separate for now? 
-                                                    WAIT - "fait en sorte que des cas du genre soient sur la même ligne".
-                                                    I will provide edit/delete for each subject in small icons or just for the group.
-                                                 */}
                                                 {group.ids.map((id, idx) => (
                                                     <div key={id} className={`flex items-center gap-1 ${idx > 0 ? 'border-l pl-2 border-gray-100' : ''}`}>
                                                         <button
@@ -348,8 +352,12 @@ const Assignments = () => {
                     </div>
 
                     <div className="pt-4 flex justify-end space-x-3">
-                        <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">Annuler</button>
-                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm">{editingId ? "Mettre à jour" : "Affecter"}</button>
+                        <Button type="button" variant="secondary" onClick={() => setIsModalOpen(false)}>
+                            Annuler
+                        </Button>
+                        <Button type="submit" isLoading={isSubmitting}>
+                            {editingId ? "Mettre à jour" : "Affecter"}
+                        </Button>
                     </div>
                 </form>
             </Modal>

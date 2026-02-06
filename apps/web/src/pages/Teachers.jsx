@@ -1,21 +1,21 @@
 import React, { useState } from 'react';
-import { Search, Plus, Phone, Mail, BookOpen, MoreVertical, Edit2, Trash2, User, Check, CheckCircle, X } from 'lucide-react';
-import Modal from '../components/ui/Modal';
-import Card from '../components/ui/Card';
+import { useToast } from '../context/ToastContext';
 import Button from '../components/ui/Button';
-import Input from '../components/ui/Input';
-import Select from '../components/ui/Select';
-import Badge from '../components/ui/Badge';
 import { useSchool } from '../context/SchoolContext';
 import { useAcademicYear } from '../context/AcademicYearContext';
+import { CheckCircle, XCircle, Trash2, Edit2, Plus, Search, Phone, Mail, BookOpen, Check, X } from 'lucide-react';
+import Modal from '../components/ui/Modal';
+import Badge from '../components/ui/Badge';
+import { searchItems } from '../utils/searchUtils';
 
 const Teachers = () => {
     const { teachers, setTeachers, subjects, createTeacher, approveTeacher, approveAllTeachers, rejectTeacher, refreshData } = useSchool();
     const { isYearLocked } = useAcademicYear();
+    const { showSuccess, showError, showInfo } = useToast();
 
-    const [activeTab, setActiveTab] = useState('active'); // 'active' | 'pending'
+    const [activeTab, setActiveTab] = useState('active');
+    const [searchQuery, setSearchQuery] = useState('');
     const [isModalOpen, setIsModalOpen] = useState(false);
-    const [loading, setLoading] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [formData, setFormData] = useState({
         nom: '',
@@ -24,24 +24,14 @@ const Teachers = () => {
         phone: '',
         email: ''
     });
-    const [searchQuery, setSearchQuery] = useState('');
+    const [loading, setLoading] = useState(false);
 
-    // Filter teachers based on tab
-    const approvedTeachers = teachers.filter(t => t.is_approved !== false);
-    const pendingTeachers = teachers.filter(t => t.is_approved === false);
+    // Derived Data
+    const approvedTeachers = teachers ? teachers.filter(t => t.is_approved !== false) : [];
+    const pendingTeachers = teachers ? teachers.filter(t => t.is_approved === false) : [];
 
-    const filtered = (activeTab === 'active' ? approvedTeachers : pendingTeachers).filter(t => {
-        const q = searchQuery.toLowerCase();
-        return !q ||
-            (t.nom && t.nom.toLowerCase().includes(q)) ||
-            (t.prenom && t.prenom.toLowerCase().includes(q)) ||
-            (t.email && t.email.toLowerCase().includes(q)) ||
-            (t.subject && t.subject.toLowerCase().includes(q));
-    });
-
-    const displayedTeachers = filtered;
-
-
+    const filteredByTab = activeTab === 'active' ? approvedTeachers : pendingTeachers;
+    const displayedTeachers = searchItems(filteredByTab, searchQuery, ['nom', 'prenom', 'subject']);
 
     const handleEditTeacher = (teacher) => {
         setEditingId(teacher.id);
@@ -57,12 +47,11 @@ const Teachers = () => {
 
     const handleDeleteTeacher = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer ce professeur ?')) {
-            // Use rejectTeacher logic as it handles deletion
             const res = await rejectTeacher(id);
             if (res.success) {
-                // UI update via refreshData in context
+                showSuccess("Professeur supprimé");
             } else {
-                alert("Erreur lors de la suppression: " + res.error);
+                showError("Erreur lors de la suppression: " + res.error);
             }
         }
     };
@@ -70,14 +59,16 @@ const Teachers = () => {
     const handleApprove = async (id) => {
         if (window.confirm('Confirmer l\'approbation de ce professeur ?')) {
             const res = await approveTeacher(id);
-            if (!res.success) alert("Erreur: " + res.error);
+            if (!res.success) showError("Erreur: " + res.error);
+            else showSuccess("Professeur approuvé");
         }
     };
 
     const handleReject = async (id) => {
         if (window.confirm('Rejeter et supprimer cette demande d\'inscription ?')) {
             const res = await rejectTeacher(id);
-            if (!res.success) alert("Erreur: " + res.error);
+            if (!res.success) showError("Erreur: " + res.error);
+            else showSuccess("Demande rejetée");
         }
     };
 
@@ -85,7 +76,8 @@ const Teachers = () => {
         if (window.confirm(`Confirmer l'approbation de ${pendingTeachers.length} demande(s) de professeur(s) ?`)) {
             const ids = pendingTeachers.map(t => t.id);
             const res = await approveAllTeachers(ids);
-            if (!res.success) alert("Erreur: " + res.error);
+            if (!res.success) showError("Erreur: " + res.error);
+            else showSuccess("Toutes les demandes ont été approuvées");
         }
     };
 
@@ -93,17 +85,23 @@ const Teachers = () => {
         e.preventDefault();
         setLoading(true);
 
-        if (editingId) {
-            // Mock Edit Logic for now (Task scope was create/approve)
-            setTeachers(teachers.map(t =>
-                t.id === editingId
-                    ? { ...t, ...formData }
-                    : t
-            ));
+        try {
+            if (editingId) {
+                // Mock Edit Logic for now (or implement updateTeacher in Context)
+                setTeachers(teachers.map(t =>
+                    t.id === editingId
+                        ? { ...t, ...formData }
+                        : t
+                ));
+                showSuccess("Informations mises à jour (Local)");
+                setIsModalOpen(false);
+                setFormData({ nom: '', prenom: '', subject: '', phone: '', email: '' });
+                setEditingId(null);
+            }
+        } catch (error) {
+            showError("Erreur lors de la mise à jour");
+        } finally {
             setLoading(false);
-            setIsModalOpen(false);
-            setFormData({ nom: '', prenom: '', subject: '', phone: '', email: '' });
-            setEditingId(null);
         }
     };
 
@@ -116,13 +114,13 @@ const Teachers = () => {
                     <p className="text-gray-500 mt-1">Gérez la liste des enseignants et leurs attributions</p>
                 </div>
                 {pendingTeachers.length > 0 && !isYearLocked && (
-                    <button
+                    <Button
                         onClick={handleApproveAll}
-                        className="flex items-center space-x-2 bg-green-600 text-white px-4 py-2 rounded-xl hover:bg-green-700 transition-colors shadow-sm"
+                        variant="success"
+                        icon={CheckCircle}
                     >
-                        <CheckCircle className="w-5 h-5" />
-                        <span>Tout approuver ({pendingTeachers.length})</span>
-                    </button>
+                        Tout approuver ({pendingTeachers.length})
+                    </Button>
                 )}
             </div>
 
@@ -170,16 +168,16 @@ const Teachers = () => {
 
                 <div className="overflow-x-auto">
                     <table className="w-full text-left">
-                        <thead className="bg-gray-50">
+                        <thead className="bg-gray-50 dark:bg-gray-700/50">
                             <tr>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Nom & Prénoms</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Matière</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider">Statut</th>
-                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 uppercase tracking-wider text-right">Actions</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Nom & Prénoms</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Matière</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Contact</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider">Statut</th>
+                                <th className="px-6 py-4 text-xs font-semibold text-gray-500 dark:text-gray-400 uppercase tracking-wider text-right">Actions</th>
                             </tr>
                         </thead>
-                        <tbody className="divide-y divide-gray-100">
+                        <tbody className="divide-y divide-gray-100 dark:divide-gray-700">
                             {displayedTeachers.length === 0 ? (
                                 <tr>
                                     <td colSpan="5" className="px-6 py-10 text-center text-gray-400 italic">
@@ -188,7 +186,7 @@ const Teachers = () => {
                                 </tr>
                             ) : (
                                 displayedTeachers.map((teacher) => (
-                                    <tr key={teacher.id} className="hover:bg-gray-50 transition-colors">
+                                    <tr key={teacher.id} className="hover:bg-gray-50 dark:hover:bg-gray-700/50 transition-colors">
                                         <td className="px-6 py-4 whitespace-nowrap">
                                             <div className="flex items-center">
                                                 <div className="w-10 h-10 rounded-full bg-gradient-to-br from-blue-100 to-blue-200 text-blue-700 flex items-center justify-center font-bold text-sm mr-3">
@@ -360,19 +358,19 @@ const Teachers = () => {
                     </div>
 
                     <div className="pt-4 flex justify-end space-x-3">
-                        <button
+                        <Button
                             type="button"
+                            variant="secondary"
                             onClick={() => setIsModalOpen(false)}
-                            className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors"
                         >
                             Annuler
-                        </button>
-                        <button
+                        </Button>
+                        <Button
                             type="submit"
-                            className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm"
+                            isLoading={loading}
                         >
-                            {editingId ? "Mettre à jour" : (loading ? "Enregistrement..." : "Enregistrer")}
-                        </button>
+                            {editingId ? "Mettre à jour" : "Enregistrer"}
+                        </Button>
                     </div>
                 </form>
             </Modal>

@@ -30,6 +30,8 @@ import { ToastProvider } from './context/ToastContext';
 import { ToastContainer } from './components/ui/Toast';
 import { useToast } from './context/ToastContext';
 
+import { ThemeProvider } from './context/ThemeContext';
+
 const ToastRenderer = () => {
   const { toasts, removeToast } = useToast();
   return <ToastContainer toasts={toasts} removeToast={removeToast} />;
@@ -37,40 +39,42 @@ const ToastRenderer = () => {
 
 function App() {
   return (
-    <ToastProvider>
-      <AcademicYearProvider>
-        <SchoolProvider>
-          <Router>
-            <ToastRenderer />
-            <Routes>
-              <Route path="/login" element={<Login />} />
+    <ThemeProvider>
+      <ToastProvider>
+        <AcademicYearProvider>
+          <SchoolProvider>
+            <Router>
+              <ToastRenderer />
+              <Routes>
+                <Route path="/login" element={<Login />} />
 
-              {/* Protected Routes */}
-              <Route element={
-                <ProtectedRoute>
-                  <DashboardLayout />
-                </ProtectedRoute>
-              }>
-                <Route path="/dashboard" element={<Dashboard />} />
-                <Route path="/teachers" element={<Teachers />} />
-                <Route path="/students" element={<Students />} />
-                <Route path="/classes" element={<Classes />} />
-                <Route path="/assignments" element={<Assignments />} />
-                <Route path="/grades" element={<Grades />} />
-                <Route path="/archives" element={<Archives />} />
-                <Route path="/notifications" element={<Notifications />} />
-                <Route path="/app-versions" element={<AppVersions />} />
-                <Route path="/reports" element={<Reports />} />
-                <Route path="/settings" element={<Settings />} />
-              </Route>
+                {/* Protected Routes */}
+                <Route element={
+                  <ProtectedRoute>
+                    <DashboardLayout />
+                  </ProtectedRoute>
+                }>
+                  <Route path="/dashboard" element={<Dashboard />} />
+                  <Route path="/teachers" element={<Teachers />} />
+                  <Route path="/students" element={<Students />} />
+                  <Route path="/classes" element={<Classes />} />
+                  <Route path="/assignments" element={<Assignments />} />
+                  <Route path="/grades" element={<Grades />} />
+                  <Route path="/archives" element={<Archives />} />
+                  <Route path="/notifications" element={<Notifications />} />
+                  <Route path="/app-versions" element={<AppVersions />} />
+                  <Route path="/reports" element={<Reports />} />
+                  <Route path="/settings" element={<Settings />} />
+                </Route>
 
-              <Route path="/" element={<Navigate to="/dashboard" replace />} />
-              <Route path="*" element={<NotFound />} />
-            </Routes>
-          </Router>
-        </SchoolProvider>
-      </AcademicYearProvider>
-    </ToastProvider>
+                <Route path="/" element={<Navigate to="/dashboard" replace />} />
+                <Route path="*" element={<NotFound />} />
+              </Routes>
+            </Router>
+          </SchoolProvider>
+        </AcademicYearProvider>
+      </ToastProvider>
+    </ThemeProvider>
   );
 }
 

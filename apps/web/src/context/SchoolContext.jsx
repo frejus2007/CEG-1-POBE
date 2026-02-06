@@ -173,11 +173,11 @@ export const SchoolProvider = ({ children }) => {
         try {
             console.log("Fetching Supabase data...");
 
-            // Parallel Fetcher (High-Performance for large datasets)
+            // Sequential Fetcher (Optimized to prevent ERR_INSUFFICIENT_RESOURCES)
             const parallelFetch = async (table, selectQuery, queryBuilder = (q) => q) => {
-                const PAGE_SIZE = 1000;
+                const PAGE_SIZE = 500; // Reduced from 1000 to save memory
 
-                // 1. Get total count first
+                // 1. Get total count
                 let countQuery = supabase.from(table).select('*', { count: 'exact', head: true });
                 countQuery = queryBuilder(countQuery);
                 const { count, error: countError } = await countQuery;
@@ -185,25 +185,29 @@ export const SchoolProvider = ({ children }) => {
                 if (countError) throw countError;
                 if (!count) return [];
 
-                // 2. Prepare parallel page requests
+                // 2. Prepare pages and fetch SEQUENTIALLY
                 const totalPages = Math.ceil(count / PAGE_SIZE);
-                const pageIndices = Array.from({ length: totalPages }, (_, i) => i);
+                console.log(`Sequential fetch starting for ${table}: ${count} records, ${totalPages} pages.`);
 
-                console.log(`Parallel fetch starting for ${table}: ${count} records, ${totalPages} pages.`);
+                let allData = [];
 
-                const results = await Promise.all(pageIndices.map(async (pageIndex) => {
-                    const from = pageIndex * PAGE_SIZE;
+                for (let i = 0; i < totalPages; i++) {
+                    const from = i * PAGE_SIZE;
                     const to = from + PAGE_SIZE - 1;
 
                     let query = supabase.from(table).select(selectQuery).range(from, to);
                     query = queryBuilder(query);
+
                     const { data, error } = await query;
-
                     if (error) throw error;
-                    return data;
-                }));
 
-                return results.flat();
+                    if (data) allData = allData.concat(data);
+
+                    // Small delay to let UI breathe/GC run if needed
+                    // await new Promise(r => setTimeout(r, 50)); 
+                }
+
+                return allData;
             };
 
             // 1. Academic Years
@@ -303,7 +307,12 @@ export const SchoolProvider = ({ children }) => {
                     name: c.name,
                     level: c.level,
                     students: studentCount,
-                    mainTeacher: c.main_teacher?.full_name || 'Non assigné',
+                    mainTeacher: c.main_teacher ? {
+                        id: c.main_teacher_id,
+                        nom: c.main_teacher.full_name?.split(' ')[0] || '',
+                        prenom: c.main_teacher.full_name?.split(' ').slice(1).join(' ') || '',
+                        full_name: c.main_teacher.full_name
+                    } : null,
                     mainTeacherId: c.main_teacher_id,
                     subjects: 10 // Placeholder
                 };
@@ -593,7 +602,7 @@ export const SchoolProvider = ({ children }) => {
         }
     };
 
-    const updateClass = async (id, classData) => {
+    const updateClass = async (id, classData, options = {}) => {
         try {
             const { error } = await supabase.from('classes')
                 .update({
@@ -645,7 +654,7 @@ export const SchoolProvider = ({ children }) => {
                 } catch (cErr) { console.error("Conduite automation error:", cErr); }
             }
 
-            await refreshData();
+            if (!options.skipRefresh) await refreshData();
             return { success: true };
         } catch (err) {
             console.error("Error updating class:", err);
@@ -888,7 +897,7 @@ export const SchoolProvider = ({ children }) => {
     };
 
     // --- ASSIGNMENT MANAGEMENT ---
-    const addAssignment = async (assignmentData) => {
+    const addAssignment = async (assignmentData, options = {}) => {
         try {
             const subjectId = assignmentData.subject_id || assignmentData.subjectId;
             const subjectIds = Array.isArray(subjectId) ? subjectId : [subjectId];
@@ -917,7 +926,7 @@ export const SchoolProvider = ({ children }) => {
                 } catch (cErr) { console.error("Coeff automation error:", cErr); }
             }
 
-            await refreshData();
+            if (!options.skipRefresh) await refreshData();
             return { success: true };
         } catch (err) {
             console.error("Error adding assignment:", err);
@@ -926,7 +935,7 @@ export const SchoolProvider = ({ children }) => {
         }
     };
 
-    const updateAssignment = async (id, assignmentData) => {
+    const updateAssignment = async (id, assignmentData, options = {}) => {
         try {
             const { error } = await supabase.from('teacher_assignments')
                 .update({
@@ -952,7 +961,7 @@ export const SchoolProvider = ({ children }) => {
                 }
             } catch (cErr) { console.error("Coeff update error:", cErr); }
 
-            await refreshData();
+            if (!options.skipRefresh) await refreshData();
             return { success: true };
         } catch (err) {
             console.error("Error updating assignment:", err);

@@ -190,6 +190,20 @@ const Grades = () => {
             const subjectGrades = student.grades?.[selectedSubject]?.[selectedViewSemester];
             if (!subjectGrades) continue;
 
+            // --- AUTO-FILL CONDUITE LOGIC ---
+            // If Subject is Conduite, replicate Interro 1 to Devoir 1 & 2
+            const isConduite = selectedSubject.toLowerCase().includes('conduite');
+            if (isConduite) {
+                const baseNote = subjectGrades['interro1'];
+                if (baseNote !== undefined && baseNote !== "") {
+                    // Force the other slots to match in memory for the save loop
+                    // Note: This doesn't update UI immediately unless we reload, but saves correctly
+                    subjectGrades['devoir1'] = baseNote;
+                    subjectGrades['devoir2'] = baseNote;
+                }
+            }
+            // --------------------------------
+
             for (const [type, value] of Object.entries(subjectGrades)) {
                 let numValue = value === "" ? null : parseFloat(value);
 

@@ -1,93 +1,25 @@
-import React, { useState, useEffect } from 'react';
-import { Search, Plus, Filter, Download, Edit2, Trash2, X, Users, ChevronLeft } from 'lucide-react';
-import Modal from '../components/ui/Modal';
-import { useAcademicYear } from '../context/AcademicYearContext';
+import React, { useState } from 'react';
+import { useToast } from '../context/ToastContext';
+import Button from '../components/ui/Button';
 import { useSchool } from '../context/SchoolContext';
-import { generateRandomStudents, exportToExcel, formatStudentForExport } from '../utils/exportUtils';
+import { useAcademicYear } from '../context/AcademicYearContext';
+import { CheckCircle, XCircle, Trash2, Edit2, Plus, Search, ChevronLeft, Download, Upload } from 'lucide-react';
+import Modal from '../components/ui/Modal';
+import LevelCard from '../components/LevelCard';
+import ClassCard from '../components/ClassCard';
+import { exportToExcel, formatStudentForExport } from '../utils/exportUtils';
+import { searchItems } from '../utils/searchUtils';
 
 const LEVELS = ['6ème', '5ème', '4ème', '3ème', '2nde', '1ère', 'Tle'];
-
-const LevelCard = ({ level, studentCount, onClick }) => (
-    <div
-        onClick={onClick}
-        className="bg-white p-6 rounded-2xl shadow-sm border border-gray-100 hover:shadow-md transition-all cursor-pointer group flex flex-col items-center justify-center text-center space-y-3 h-48"
-    >
-        <div className="w-16 h-16 bg-blue-50 text-blue-600 rounded-full flex items-center justify-center group-hover:scale-110 transition-transform">
-            <Users className="w-8 h-8" />
-        </div>
-        <div>
-            <h3 className="text-xl font-bold text-gray-900">{level}</h3>
-            <p className="text-sm text-gray-500 font-medium">{studentCount} Élèves</p>
-        </div>
-    </div>
-);
-
-const ClassCard = ({ className, studentCount, onClick }) => (
-    <div
-        onClick={onClick}
-        className="bg-white p-5 rounded-xl border border-gray-100 shadow-sm hover:border-blue-400 hover:shadow-md transition-all cursor-pointer group flex flex-col items-center justify-center text-center space-y-2"
-    >
-        <div className="w-10 h-10 bg-gray-50 text-gray-600 rounded-lg flex items-center justify-center font-bold group-hover:bg-blue-600 group-hover:text-white transition-colors">
-            {className.split(' ').slice(1).join(' ').substring(0, 2) || className[0]}
-        </div>
-        <h3 className="font-bold text-gray-900">{className}</h3>
-        <p className="text-xs text-gray-500">{studentCount} Élèves</p>
-    </div>
-);
 
 const Students = () => {
     const { isYearLocked, isArchiveView, selectedYear } = useAcademicYear();
     const { students, classes, addStudent, updateStudent, deleteStudent } = useSchool();
+    const { showSuccess, showError } = useToast();
 
     const [selectedLevel, setSelectedLevel] = useState(null);
     const [selectedClass, setSelectedClass] = useState(null);
-    const [viewStudents, setViewStudents] = useState([]);
     const [searchQuery, setSearchQuery] = useState('');
-
-    useEffect(() => {
-        let data = [];
-        if (isArchiveView) {
-            const randomData = generateRandomStudents(selectedYear, 12);
-            data = randomData.map(s => ({
-                ...s,
-                nom: s.name ? s.name.split(' ')[0] : s.nom,
-                prenom: s.name ? s.name.split(' ').slice(1).join(' ') : s.prenom
-            }));
-        } else {
-            data = students;
-        }
-
-        // Apply Filters
-        let filtered = data;
-        if (selectedClass) {
-            filtered = filtered.filter(s => s.class === selectedClass);
-        } else if (selectedLevel) {
-            filtered = filtered.filter(s => s.class?.startsWith(selectedLevel + ' '));
-        }
-
-        if (searchQuery) {
-            const q = searchQuery.toLowerCase();
-            filtered = filtered.filter(s =>
-                (s.nom && s.nom.toLowerCase().includes(q)) ||
-                (s.prenom && s.prenom.toLowerCase().includes(q)) ||
-                (s.matricule && s.matricule.toLowerCase().includes(q))
-            );
-        }
-
-        setViewStudents(filtered);
-    }, [isArchiveView, selectedYear, students, selectedLevel, selectedClass, searchQuery]);
-
-    // Grouping stats
-    const levelCounts = LEVELS.reduce((acc, level) => {
-        acc[level] = students.filter(s => s.class?.startsWith(level + ' ')).length;
-        return acc;
-    }, {});
-
-    const classCounts = classes.reduce((acc, cls) => {
-        acc[cls.name] = students.filter(s => s.classId === cls.id).length;
-        return acc;
-    }, {});
-
     const [isModalOpen, setIsModalOpen] = useState(false);
     const [editingId, setEditingId] = useState(null);
     const [formData, setFormData] = useState({
@@ -97,46 +29,66 @@ const Students = () => {
         class: '',
         dob: ''
     });
+    const [isSubmitting, setIsSubmitting] = useState(false);
+
+    // Derived Data
+    const levelCounts = students.reduce((acc, student) => {
+        const level = student.class ? student.class.split(' ')[0] : 'Unknown';
+        acc[level] = (acc[level] || 0) + 1;
+        return acc;
+    }, {});
+
+    const classCounts = students.reduce((acc, student) => {
+        if (student.class) {
+            acc[student.class] = (acc[student.class] || 0) + 1;
+        }
+        return acc;
+    }, {});
+
+    const viewStudents = searchItems(students, searchQuery, ['nom', 'prenom', 'matricule'])
+        .filter(student => {
+            if (selectedClass) return student.class === selectedClass;
+            if (selectedLevel) return student.class && student.class.startsWith(selectedLevel);
+            // If no class/level selected but search query exists, show global results
+            // (The searchItems call above already filtered by query, so here we just return true if query exists)
+            // But wait, the original logic had specific behavior. Let's replicate exact behavior but improved matching.
+            if (searchQuery) return true;
+            return false;
+        });
 
     const handleAddStudent = () => {
         setEditingId(null);
-        setFormData({
-            nom: '',
-            prenom: '',
-            matricule: '',
-            class: selectedClass || '',
-            dob: ''
-        });
+        setFormData({ nom: '', prenom: '', matricule: '', class: '', dob: '' });
         setIsModalOpen(true);
     };
 
     const handleEditStudent = (student) => {
         setEditingId(student.id);
-
-        let formattedDob = student.dob;
-        if (student.dob && student.dob.includes('/')) {
-            const [day, month, year] = student.dob.split('/');
-            formattedDob = `${year}-${month}-${day}`;
-        }
-
         setFormData({
             nom: student.nom,
             prenom: student.prenom,
             matricule: student.matricule,
             class: student.class,
-            dob: formattedDob
+            dob: student.dob
         });
         setIsModalOpen(true);
     };
 
     const handleDeleteStudent = async (id) => {
         if (window.confirm('Êtes-vous sûr de vouloir supprimer cet élève ?')) {
-            await deleteStudent(id);
+            const res = await deleteStudent(id);
+            if (res.error) {
+                showError("Erreur lors de la suppression: " + res.error);
+            } else {
+                showSuccess("Élève supprimé avec succès");
+            }
         }
     };
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setIsSubmitting(true);
+
         const studentPayload = {
             nom: formData.nom,
             prenom: formData.prenom,
@@ -145,18 +97,26 @@ const Students = () => {
             dob: formData.dob
         };
 
-        let res;
-        if (editingId) {
-            res = await updateStudent(editingId, studentPayload);
-        } else {
-            res = await addStudent(studentPayload);
-        }
+        try {
+            let res;
+            if (editingId) {
+                res = await updateStudent(editingId, studentPayload);
+            } else {
+                res = await addStudent(studentPayload);
+            }
 
-        if (res.success) {
-            setIsModalOpen(false);
-            setEditingId(null);
-        } else {
-            alert("Erreur: " + res.error);
+            if (res.success) {
+                showSuccess(editingId ? "Élève mis à jour avec succès" : "Élève ajouté avec succès");
+                setIsModalOpen(false);
+                setEditingId(null);
+            } else {
+                showError("Erreur: " + res.error);
+            }
+        } catch (err) {
+            console.error(err);
+            showError("Une erreur inattendue est survenue");
+        } finally {
+            setIsSubmitting(false);
         }
     };
 
@@ -207,13 +167,12 @@ const Students = () => {
                         </button>
                     )}
                     {!isYearLocked && (
-                        <button
+                        <Button
                             onClick={handleAddStudent}
-                            className="flex items-center justify-center space-x-2 bg-blue-600 text-white px-4 py-2 rounded-xl hover:bg-blue-700 transition-colors shadow-sm"
+                            icon={Plus}
                         >
-                            <Plus className="w-5 h-5" />
-                            <span>Nouvel Élève</span>
-                        </button>
+                            Nouvel Élève
+                        </Button>
                     )}
                 </div>
             </div>
@@ -371,8 +330,19 @@ const Students = () => {
                         </div>
                     </div>
                     <div className="pt-4 flex justify-end space-x-3">
-                        <button type="button" onClick={() => setIsModalOpen(false)} className="px-4 py-2 text-gray-700 hover:bg-gray-100 rounded-lg transition-colors">Annuler</button>
-                        <button type="submit" className="px-4 py-2 bg-blue-600 text-white rounded-lg hover:bg-blue-700 transition-colors shadow-sm">{editingId ? "Mettre à jour" : "Enregistrer"}</button>
+                        <Button
+                            type="button"
+                            variant="secondary"
+                            onClick={() => setIsModalOpen(false)}
+                        >
+                            Annuler
+                        </Button>
+                        <Button
+                            type="submit"
+                            isLoading={isSubmitting}
+                        >
+                            {editingId ? "Mettre à jour" : "Enregistrer"}
+                        </Button>
                     </div>
                 </form>
             </Modal>

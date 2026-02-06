@@ -3,6 +3,7 @@ import { Mail, Lock, LogIn, AlertCircle, GraduationCap } from 'lucide-react';
 import { useNavigate } from 'react-router-dom';
 import { useSchool } from '../context/SchoolContext';
 import { motion } from 'framer-motion';
+import Button from '../components/ui/Button';
 
 const Login = () => {
     const navigate = useNavigate();
@@ -35,7 +36,7 @@ const Login = () => {
     };
 
     return (
-        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 p-4">
+        <div className="min-h-screen flex items-center justify-center bg-gradient-to-br from-blue-50 via-white to-purple-50 dark:from-gray-900 dark:via-gray-900 dark:to-gray-800 p-4 transition-colors duration-500">
             {/* Background Pattern */}
             <div className="absolute inset-0 overflow-hidden pointer-events-none">
                 <div className="absolute -top-40 -right-40 w-80 h-80 bg-blue-200 rounded-full mix-blend-multiply filter blur-3xl opacity-30 animate-blob"></div>
@@ -50,16 +51,20 @@ const Login = () => {
                 className="w-full max-w-md relative z-10"
             >
                 {/* Card */}
-                <div className="bg-white rounded-3xl shadow-2xl border border-gray-100 overflow-hidden">
+                <div className="bg-white dark:bg-gray-800 rounded-3xl shadow-2xl border border-gray-100 dark:border-gray-700 overflow-hidden transition-colors duration-300">
                     {/* Header */}
                     <div className="bg-gradient-to-r from-blue-600 to-purple-600 px-8 py-10 text-center">
                         <motion.div
                             initial={{ scale: 0 }}
                             animate={{ scale: 1 }}
                             transition={{ delay: 0.2, type: "spring", stiffness: 200 }}
-                            className="w-16 h-16 bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg"
+                            className="bg-white rounded-2xl flex items-center justify-center mx-auto mb-4 shadow-lg p-2 w-20 h-20"
                         >
-                            <GraduationCap className="w-10 h-10 text-blue-600" />
+                            <img
+                                src="/logo.png"
+                                alt="Logo CEG1 Pobè"
+                                className="w-full h-full object-contain"
+                            />
                         </motion.div>
                         <h1 className="text-3xl font-bold text-white mb-2">CEG1 Pobè</h1>
                         <p className="text-blue-100 text-sm">Système de Gestion des Notes</p>
@@ -68,14 +73,16 @@ const Login = () => {
                     {/* Form */}
                     <div className="p-8">
                         <div className="mb-6">
-                            <h2 className="text-2xl font-bold text-gray-900 mb-2">Connexion</h2>
-                            <p className="text-gray-500 text-sm">Accédez à votre espace d'administration</p>
+                            <h2 className="text-2xl font-bold text-gray-900 dark:text-white mb-2">Connexion</h2>
+                            <p className="text-gray-500 dark:text-gray-400 text-sm">Accédez à votre espace d'administration</p>
                         </div>
 
                         {error && (
                             <motion.div
-                                initial={{ opacity: 0, y: -10 }}
-                                animate={{ opacity: 1, y: 0 }}
+                                initial={{ opacity: 0, x: -20 }}
+                                animate={{ opacity: 1, x: 0 }}
+                                exit={{ opacity: 0, x: 20 }}
+                                transition={{ type: "spring", stiffness: 300, damping: 20 }}
                                 className="mb-6 p-4 bg-red-50 border border-red-200 rounded-xl flex items-start space-x-3"
                             >
                                 <AlertCircle className="w-5 h-5 text-red-500 flex-shrink-0 mt-0.5" />
@@ -97,7 +104,7 @@ const Login = () => {
                                         value={email}
                                         onChange={(e) => setEmail(e.target.value)}
                                         placeholder="censeur@ceg1pobe.bj"
-                                        className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 placeholder:text-gray-400"
+                                        className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 placeholder:text-gray-400 dark:bg-gray-700 dark:border-gray-600 dark:text-white dark:placeholder-gray-500"
                                         required
                                         autoComplete="email"
                                     />
@@ -115,27 +122,21 @@ const Login = () => {
                                         value={password}
                                         onChange={(e) => setPassword(e.target.value)}
                                         placeholder="••••••••"
-                                        className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900"
+                                        className="w-full pl-12 pr-4 py-3.5 bg-gray-50 border border-gray-200 rounded-xl focus:ring-2 focus:ring-blue-500 focus:border-transparent outline-none transition-all text-gray-900 dark:bg-gray-700 dark:border-gray-600 dark:text-white"
                                         required
                                         autoComplete="current-password"
                                     />
                                 </div>
                             </div>
 
-                            <button
+                            <Button
                                 type="submit"
-                                disabled={loading}
-                                className="w-full py-3.5 px-4 bg-gradient-to-r from-blue-600 to-purple-600 hover:from-blue-700 hover:to-purple-700 text-white font-semibold rounded-xl shadow-lg hover:shadow-xl transform hover:-translate-y-0.5 transition-all duration-200 disabled:opacity-70 disabled:cursor-not-allowed disabled:transform-none flex items-center justify-center space-x-2"
+                                isLoading={loading}
+                                className="w-full py-3.5"
+                                icon={LogIn}
                             >
-                                {loading ? (
-                                    <div className="w-6 h-6 border-2 border-white border-t-transparent rounded-full animate-spin"></div>
-                                ) : (
-                                    <>
-                                        <span>Se connecter</span>
-                                        <LogIn className="w-5 h-5" />
-                                    </>
-                                )}
-                            </button>
+                                Se connecter
+                            </Button>
                         </form>
 
                         <div className="mt-6 pt-6 border-t border-gray-100">

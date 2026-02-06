@@ -17,6 +17,8 @@ import {
 } from 'lucide-react';
 import clsx from 'clsx';
 
+import ThemeToggle from './ThemeToggle';
+
 const Sidebar = () => {
     const navigate = useNavigate();
     const { logout } = useSchool();
@@ -35,14 +37,16 @@ const Sidebar = () => {
     ];
 
     return (
-        <aside className="w-64 bg-white border-r border-gray-200 h-screen fixed left-0 top-0 flex flex-col z-20">
-            <div className="p-6 border-b border-gray-100">
+        <aside className="w-64 bg-white dark:bg-gray-800 border-r border-gray-200 dark:border-gray-700 h-screen fixed left-0 top-0 flex flex-col z-20 transition-colors duration-300">
+            <div className="p-6 border-b border-gray-100 dark:border-gray-800">
                 <div className="flex items-center space-x-3">
-                    <div className="w-10 h-10 bg-gradient-to-tr from-blue-600 to-purple-600 rounded-xl flex items-center justify-center text-white font-bold shadow-lg">
-                        CEG
-                    </div>
+                    <img
+                        src="/logo.png"
+                        alt="Logo CEG1 Pobè"
+                        className="w-10 h-10 object-contain"
+                    />
                     <div>
-                        <h1 className="font-bold text-gray-800">CEG1 Pobè</h1>
+                        <h1 className="font-bold text-gray-800 dark:text-white">CEG1 Pobè</h1>
                         <p className="text-xs text-gray-500">Administration</p>
                     </div>
                 </div>
@@ -57,8 +61,8 @@ const Sidebar = () => {
                             clsx(
                                 "flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 group",
                                 isActive
-                                    ? "bg-blue-50 text-blue-600 font-medium shadow-sm"
-                                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900"
+                                    ? "bg-blue-50 text-blue-600 font-medium shadow-sm dark:bg-blue-900/20 dark:text-blue-400"
+                                    : "text-gray-600 hover:bg-gray-50 hover:text-gray-900 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                             )
                         }
                     >
@@ -68,13 +72,17 @@ const Sidebar = () => {
                 ))}
             </nav>
 
-            <div className="p-4 border-t border-gray-100">
+            <div className="p-4 border-t border-gray-100 dark:border-gray-800">
+                <div className="flex items-center justify-between mb-2 px-4">
+                    <span className="text-xs font-medium text-gray-500 dark:text-gray-400">Thème</span>
+                    <ThemeToggle />
+                </div>
                 <NavLink
                     to="/settings"
                     className={({ isActive }) =>
                         clsx(
                             "flex items-center space-x-3 px-4 py-3 rounded-xl transition-all duration-200 mb-1",
-                            isActive ? "bg-gray-100 text-gray-900" : "text-gray-600 hover:bg-gray-50"
+                            isActive ? "bg-gray-100 text-gray-900 dark:bg-gray-700 dark:text-white" : "text-gray-600 hover:bg-gray-50 dark:text-gray-400 dark:hover:bg-gray-800 dark:hover:text-gray-200"
                         )
                     }
                 >
@@ -86,7 +94,7 @@ const Sidebar = () => {
                         await logout();
                         navigate('/login');
                     }}
-                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors"
+                    className="w-full flex items-center space-x-3 px-4 py-3 rounded-xl text-red-600 hover:bg-red-50 transition-colors dark:text-red-400 dark:hover:bg-red-900/20"
                 >
                     <LogOut className="w-5 h-5" />
                     <span>Déconnexion</span>

@@ -10,6 +10,7 @@ import { supabase } from '../lib/supabase';
 import { calculateAverages, calculateGeneralAverage, calculateRank } from '../utils/gradeUtils';
 import jsPDF from 'jspdf';
 import autoTable from 'jspdf-autotable';
+import SearchableSelect from '../components/ui/SearchableSelect';
 
 const Reports = () => {
     const { classes, students: allStudents, subjects, coefficients } = useSchool();
@@ -307,10 +308,12 @@ const Reports = () => {
                         {reportType === 'individual' && (
                             <div>
                                 <label className="block text-sm font-medium text-gray-700 mb-1">Élève</label>
-                                <Select value={studentId} onChange={(e) => setStudentId(e.target.value)}>
-                                    {availableStudents.map(s => <option key={s.id} value={s.id}>{s.nom} {s.prenom}</option>)}
-                                    {availableStudents.length === 0 && <option value="">Aucun élève</option>}
-                                </Select>
+                                <SearchableSelect
+                                    options={availableStudents.map(s => ({ value: s.id, label: `${s.nom} ${s.prenom}` }))}
+                                    value={studentId}
+                                    onChange={(val) => setStudentId(val)}
+                                    placeholder="Rechercher un élève..."
+                                />
                             </div>
                         )}
 

@@ -29,11 +29,11 @@ const Modal = ({ isOpen, onClose, title, children, className }) => {
                             className
                         )}
                     >
-                        <div className="flex items-center justify-between p-6 border-b border-gray-100 shrink-0">
-                            <h2 className="text-xl font-bold text-gray-900">{title}</h2>
+                        <div className="flex items-center justify-between p-6 border-b border-gray-100 dark:border-gray-700 shrink-0">
+                            <h2 className="text-xl font-bold text-gray-900 dark:text-white">{title}</h2>
                             <button
                                 onClick={onClose}
-                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg transition-colors"
+                                className="p-2 text-gray-400 hover:text-gray-600 hover:bg-gray-100 dark:text-gray-400 dark:hover:text-gray-200 dark:hover:bg-gray-700 rounded-lg transition-colors"
                             >
                                 <X className="w-5 h-5" />
                             </button>
