@@ -118,15 +118,22 @@ const Assignments = () => {
             }
 
             // 2. Handle Subject Assignment
+            const subjectIdInput = formData.subjectId;
+            const subjectIds = typeof subjectIdInput === 'string' && subjectIdInput.includes(',')
+                ? subjectIdInput.split(',').map(id => parseInt(id.trim()))
+                : subjectIdInput;
+
             const assignmentData = {
                 teacherId: formData.teacherId,
                 classId: formData.classId,
-                subject_id: formData.subjectId,
+                subject_id: subjectIds,
                 hours: formData.hours
             };
 
             let res;
             if (editingId) {
+                // If editing, we still handle one at a time for simplicity unless we refactor grouping logic
+                // But for new assignments, the array works perfectly.
                 res = await updateAssignment(editingId, assignmentData);
             } else {
                 res = await addAssignment(assignmentData);
@@ -157,33 +164,57 @@ const Assignments = () => {
         if (!selectedTeacherObj) return [];
 
         let availableSubjs = [];
-        const isCycle1 = selectedClassObj && ['6ème', '5ème', '4ème', '3ème'].some(l => selectedClassObj.name.startsWith(l));
+        // Cycle 1: 6ème to 3ème. Cycle 2: 2nde to Tle.
+        // Prefer explicit cycle from DB, fallback to name check if missing.
+        const isCycle1 = selectedClassObj ? (
+            selectedClassObj.cycle === 1 ||
+            ['6ème', '5ème', '4ème', '3ème'].some(l => selectedClassObj.name.startsWith(l))
+        ) : false;
 
-        const teacherSubjects = subjects.filter(s => selectedTeacherObj.subjectIds?.includes(s.id));
+        const teacherSubjectIds = selectedTeacherObj.subjectIds || [];
+        const isFrenchTeacher = teacherSubjectIds.some(id => [10, 11, 12].includes(id));
 
-        teacherSubjects.forEach(s => {
-            const cluster = getFrenchSubjectCluster(s.id);
-            if (cluster.length > 1) {
-                if (isCycle1) {
-                    if (s.name !== 'Français') availableSubjs.push({ id: s.id, name: s.name });
+        // 1. Handle French subjects cluster
+        if (isFrenchTeacher) {
+            if (isCycle1) {
+                // Add Lecture and Communication Écrite together as a couple
+                const lecture = subjects.find(s => s.id === 12 || s.name === 'Lecture');
+                const commEcrite = subjects.find(s => s.id === 11 || s.name === 'Communication Écrite');
+
+                if (lecture && commEcrite) {
+                    availableSubjs.push({
+                        id: `${lecture.id},${commEcrite.id}`,
+                        name: `(${lecture.name}, ${commEcrite.name})`
+                    });
                 } else {
-                    if (s.name === 'Français') availableSubjs.push({ id: s.id, name: s.name });
+                    if (lecture) availableSubjs.push(lecture);
+                    if (commEcrite) availableSubjs.push(commEcrite);
                 }
             } else {
-                availableSubjs.push({ id: s.id, name: s.name });
+                // Add Français if it exists
+                const francais = subjects.find(s => s.id === 10 || s.name === 'Français');
+                if (francais) availableSubjs.push(francais);
+            }
+        }
+
+        // 2. Add other subjects the teacher is qualified for (that are not in the French cluster)
+        subjects.forEach(s => {
+            if (teacherSubjectIds.includes(s.id) && ![10, 11, 12].includes(s.id)) {
+                availableSubjs.push(s);
             }
         });
 
-        // ALWAYS ADD CONDUITE IF IT EXISTS
+        // 3. ALWAYS ADD CONDUITE IF IT EXISTS
         const conduite = subjects.find(s => s.name.toLowerCase().includes('conduite'));
         if (conduite) {
-            availableSubjs.push({ id: conduite.id, name: conduite.name });
+            availableSubjs.push(conduite);
         }
 
+        // Deduplicate
         const unique = [];
         const map = new Map();
         for (const item of availableSubjs) {
-            if (!map.has(item.id)) {
+            if (item && !map.has(item.id)) {
                 map.set(item.id, true);
                 unique.push(item);
             }

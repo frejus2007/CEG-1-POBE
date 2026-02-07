@@ -314,6 +314,7 @@ export const SchoolProvider = ({ children }) => {
                         full_name: c.main_teacher.full_name
                     } : null,
                     mainTeacherId: c.main_teacher_id,
+                    cycle: c.cycle,
                     subjects: 10 // Placeholder
                 };
             });
